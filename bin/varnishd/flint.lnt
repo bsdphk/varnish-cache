@@ -63,6 +63,11 @@
 -esym(714, Vmod_*_Data)
 -esym(765, Vmod_*_Data)
 
+// VSRQ API
+-esym(754, VSRQ_)
+-esym(714, VSRQ_)
+-esym(765, VSRQ_)
+
 -esym(755, PAN_dump_once)		// global macro not referenced
 -esym(755, PAN_dump_once_oneline)	// global macro not referenced
 -esym(714, WS_Dump)	// Info 714: sym not referenced

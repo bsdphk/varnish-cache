@@ -72,6 +72,8 @@ struct transport {
 extern struct transport PROXY_transport;
 extern struct transport HTTP1_transport;
 extern struct transport H2_transport;
+extern struct transport VSRQ_transport;
+
 htc_complete_f H2_prism_complete;
 void H2_PU_Sess(struct worker *, struct sess *, struct req *);
 void H2_OU_Sess(struct worker *, struct sess *, struct req *);

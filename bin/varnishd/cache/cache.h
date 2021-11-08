@@ -776,6 +776,18 @@ VSLb_ts_busyobj(struct busyobj *bo, const char *event, vtim_real now)
 /* cache_vcl.c */
 const char *VCL_Name(const struct vcl *);
 
+/* cache_vsrq.c */
+
+struct subrequest;
+
+struct subrequest *VSRQ_New(struct req *);
+struct http *VSRQ_Req(struct subrequest *);
+struct vsb *VSRQ_Body(struct subrequest *);
+void VSRQ_Launch(struct subrequest *);
+uint16_t VSRQ_Resp_Status(struct subrequest *);
+int VSRQ_Waitfor(struct subrequest *, vtim_dur);
+void VSRQ_Release(struct subrequest **);
+
 /* cache_wrk.c */
 
 typedef void *bgthread_t(struct worker *, void *priv);

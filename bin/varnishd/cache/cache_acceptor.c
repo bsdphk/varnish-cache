@@ -731,6 +731,7 @@ XPORT_Init(void)
 	XPORT_Register(&PROXY_transport);
 	XPORT_Register(&HTTP1_transport);
 	XPORT_Register(&H2_transport);
+	XPORT_Register(&VSRQ_transport);
 }
 
 const struct transport *
