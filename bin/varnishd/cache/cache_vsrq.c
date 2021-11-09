@@ -346,7 +346,7 @@ VSRQ_Launch(struct subrequest *srq)
 	req->transport_priv = srq;
 
 	/* We always "send" a Content-Length.  The main FSM will DTRT. */
-	if (srq->body == NULL) {
+	if (srq->body == NULL || VSB_len(srq->body) == 0) {
 		http_PrintfHeader(srq->req->http, "Content-Length: 0");
 		req->req_body_status = BS_NONE;
 	} else {
@@ -367,19 +367,26 @@ VSRQ_Launch(struct subrequest *srq)
 int
 VSRQ_Waitfor(struct subrequest *srq, vtim_dur patience)
 {
-	struct timespec ts;
+	struct timespec ts = {0, 0};
+	vtim_real tfin = -1;
 	int retval;
 
 	CHECK_OBJ_NOTNULL(srq, SUBREQUEST_MAGIC);
+	if (patience > 0) {
+		tfin = VTIM_real() + patience;
+		ts = VTIM_timespec(tfin);
+	}
 	AZ(pthread_mutex_lock(&srq->mtx));
 	while (srq->state != VSRQ_STATE_DONE) {
-		if (patience <= 0) {
+		if (tfin <= 0) {
 			AZ(pthread_cond_wait(&srq->cond, &srq->mtx));
 		} else {
-			ts = VTIM_timespec(VTIM_real() + patience);
-			AZ(pthread_cond_timedwait(&srq->cond, &srq->mtx, &ts));
-			break;
+			errno = pthread_cond_timedwait(
+			    &srq->cond, &srq->mtx, &ts);
+			assert(errno == 0 || errno == ETIMEDOUT);
 		}
+		if (tfin < VTIM_real())
+			break;
 	}
 	retval = srq->state == VSRQ_STATE_DONE;
 	AZ(pthread_mutex_unlock(&srq->mtx));
