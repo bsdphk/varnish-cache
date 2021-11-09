@@ -409,6 +409,14 @@ req.is_hitpass
 
 	If this request resulted in a hitpass
 
+req.is_subrequest
+
+	Type: BOOL
+
+	Readable from: client
+
+	This request originated from the VSRQ API.
+
 req_top.method
 
 	Type: STRING

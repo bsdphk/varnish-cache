@@ -35,6 +35,7 @@
 #include <stdio.h>
 
 #include "cache_varnishd.h"
+#include "cache_transport.h"
 #include "common/heritage.h"
 
 #include "vcl.h"
@@ -379,6 +380,17 @@ VRT_r_beresp_backend_ip(VRT_CTX)
 	CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);
 	CHECK_OBJ_NOTNULL(ctx->bo, BUSYOBJ_MAGIC);
 	return (VDI_GetIP(ctx->bo));
+}
+
+/*--------------------------------------------------------------------*/
+
+VCL_BOOL
+VRT_r_req_is_subrequest(VRT_CTX)
+{
+	CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);
+
+	CHECK_OBJ_NOTNULL(ctx->req, REQ_MAGIC);
+	return (ctx->req->transport == &VSRQ_transport);
 }
 
 /*--------------------------------------------------------------------*/
