@@ -82,12 +82,10 @@ VCLI_VTE(struct cli *cli, struct vsb **src, int width)
 			wc = 0;
 		}
 		if (*p == '\n') {
-			if (cc > n_col)
-				n_col = cc;
+			n_col = vmax(n_col, cc);
+			w_ln = vmax(w_ln, wl);
 			cc = 0;
 			wc = 0;
-			if (wl > w_ln)
-				w_ln = wl;
 			wl = 0;
 		} else {
 			wc++;
@@ -99,11 +97,7 @@ VCLI_VTE(struct cli *cli, struct vsb **src, int width)
 		return;
 	AN(n_col);
 
-	nsp = (width - (w_ln)) / n_col;
-	if (nsp > 3)
-		nsp = 3;
-	else if (nsp < 1)
-		nsp = 1;
+	nsp = vlimit((width - (w_ln)) / n_col, 1, 3);
 
 	cc = 0;
 	wc = 0;
