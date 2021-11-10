@@ -148,7 +148,7 @@ vsrq_deliver(struct req *req, struct boc *boc, int sendbody)
 	struct subrequest *srq;
 
 	CHECK_OBJ_NOTNULL(req, REQ_MAGIC);
-	CHECK_OBJ_NOTNULL(boc, BOC_MAGIC);
+	CHECK_OBJ_ORNULL(boc, BOC_MAGIC);
 	CAST_OBJ_NOTNULL(srq, req->transport_priv, SUBREQUEST_MAGIC);
 
 	AZ(pthread_mutex_lock(&srq->mtx));
