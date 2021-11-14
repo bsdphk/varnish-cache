@@ -297,8 +297,10 @@ VSRQ_New(struct req *preq)
 	req = Req_New(sp);
 	srq->req = req;
 	req->sp = sp;
+	req->top = preq->top;
 	req->req_body_status = BS_NONE;
 	req->vsl->wid = VXID_Get(preq->wrk, VSL_CLIENTMARKER);
+	VSLb(preq->vsl, SLT_Link, "req %u subreq", VXID(req->vsl->wid));
 
 	HTTP_Setup(req->http, req->ws, req->vsl, SLT_ReqMethod);
 	http_SetH(req->http, HTTP_HDR_PROTO, "HTTP/1.1");
