@@ -332,6 +332,8 @@ vbf_stp_retry(struct worker *wrk, struct busyobj *bo)
 	bo->was_304 = 0;
 	bo->err_code = 0;
 	bo->err_reason = NULL;
+	if (bo->htc != NULL)
+		bo->htc->doclose = SC_NULL;
 
 	// XXX: BereqEnd + BereqAcct ?
 	VSL_ChgId(bo->vsl, "bereq", "retry", VXID_Get(wrk, VSL_BACKENDMARKER));
@@ -426,8 +428,10 @@ vbf_stp_startfetch(struct worker *wrk, struct busyobj *bo)
 
 	VSLb_ts_busyobj(bo, "Fetch", W_TIM_real(wrk));
 	i = VDI_GetHdr(bo);
+	if (bo->htc != NULL)
+		CHECK_OBJ_NOTNULL(bo->htc->doclose, STREAM_CLOSE_MAGIC);
 
-	now = W_TIM_real(wrk);
+	bo->t_resp = now = W_TIM_real(wrk);
 	VSLb_ts_busyobj(bo, "Beresp", now);
 
 	if (i) {
@@ -626,6 +630,7 @@ vbf_stp_fetchbody(struct worker *wrk, struct busyobj *bo)
 static const struct fetch_step * v_matchproto_(vbf_state_f)
 vbf_stp_fetch(struct worker *wrk, struct busyobj *bo)
 {
+	struct vrt_ctx ctx[1];
 	struct objcore *oc;
 
 	CHECK_OBJ_NOTNULL(wrk, WORKER_MAGIC);
@@ -663,7 +668,10 @@ vbf_stp_fetch(struct worker *wrk, struct busyobj *bo)
 
 	oc->boc->len_so_far = 0;
 
-	if (VFP_Open(bo->vfc)) {
+	INIT_OBJ(ctx, VRT_CTX_MAGIC);
+	VCL_Bo2Ctx(ctx, bo);
+
+	if (VFP_Open(ctx, bo->vfc)) {
 		(void)VFP_Error(bo->vfc, "Fetch pipeline failed to open");
 		bo->htc->doclose = SC_RX_BODY;
 		vbf_cleanup(bo);

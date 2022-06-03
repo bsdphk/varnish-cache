@@ -191,7 +191,6 @@ void MCF_ParamConf(enum mcf_which_e, const char *param, const char *, ...)
 void MCF_ParamSet(struct cli *, const char *param, const char *val);
 void MCF_ParamProtect(struct cli *, const char *arg);
 void MCF_DumpRstParam(void);
-void MCF_AddParams(struct parspec *ps);
 extern struct params mgt_param;
 
 /* mgt_shmem.c */
@@ -220,7 +219,8 @@ char **MGT_NamedArg(const char *, const char **, const char *);
 /* stevedore_mgt.c */
 extern const char *mgt_stv_h2_rxbuf;
 void STV_Config(const char *spec);
-void STV_Config_Transient(void);
+void STV_Config_Final(void);
+void STV_Init(void);
 
 /* mgt_vcc.c */
 void mgt_DumpBuiltin(void);
@@ -231,8 +231,10 @@ void mgt_vcl_init(void);
 void mgt_vcl_startup(struct cli *, const char *vclsrc, const char *origin,
     const char *vclname, int Cflag);
 int mgt_push_vcls(struct cli *, unsigned *status, char **p);
-int mgt_has_vcl(void);
+const char *mgt_has_vcl(void);
 extern char *mgt_cc_cmd;
+extern char *mgt_cc_cmd_def;
+extern char *mgt_cc_warn;
 extern const char *mgt_vcl_path;
 extern const char *mgt_vmod_path;
 #define MGT_VCC(t, n, cc) extern t mgt_vcc_ ## n;
@@ -242,5 +244,6 @@ extern const char *mgt_vmod_path;
 #error "Keep pthreads out of in manager process"
 #endif
 
-#define MGT_FEATURE(x)	COM_FEATURE(mgt_param.feature_bits, x)
-#define MGT_DO_DEBUG(x)	COM_DO_DEBUG(mgt_param.debug_bits, x)
+#define MGT_FEATURE(x)		COM_FEATURE(mgt_param.feature_bits, x)
+#define MGT_EXPERIMENT(x)	COM_EXPERIMENT(mgt_param.experimental_bits, x)
+#define MGT_DO_DEBUG(x)		COM_DO_DEBUG(mgt_param.debug_bits, x)

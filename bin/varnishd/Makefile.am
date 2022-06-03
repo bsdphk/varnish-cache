@@ -57,6 +57,7 @@ varnishd_SOURCES = \
 	cache/cache_ws_common.c \
 	common/common_vsc.c \
 	common/common_vsmw.c \
+	common/common_vext.c \
 	hash/hash_classic.c \
 	hash/hash_critbit.c \
 	hash/hash_simple_list.c \
@@ -85,8 +86,6 @@ varnishd_SOURCES = \
 	mgt/mgt_jail_unix.c \
 	mgt/mgt_main.c \
 	mgt/mgt_param.c \
-	mgt/mgt_param_bits.c \
-	mgt/mgt_param_tbl.c \
 	mgt/mgt_param_tcp.c \
 	mgt/mgt_param_tweak.c \
 	mgt/mgt_shmem.c \
@@ -185,7 +184,7 @@ varnishd_LDADD = \
 	${DL_LIBS} ${PTHREAD_LIBS} ${NET_LIBS} ${RT_LIBS} ${LIBM}
 
 if WITH_UNWIND
-varnishd_CFLAGS += -DUNW_LOCAL_ONLY
+varnishd_CFLAGS += -DUNW_LOCAL_ONLY ${LIBUNWIND_CFLAGS}
 varnishd_LDADD += ${LIBUNWIND_LIBS}
 endif
 

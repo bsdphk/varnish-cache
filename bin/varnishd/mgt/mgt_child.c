@@ -292,7 +292,7 @@ child_poker(const struct vev *e, int what)
 static void
 mgt_launch_child(struct cli *cli)
 {
-	pid_t pid;
+	pid_t pid, pidr;
 	unsigned u;
 	char *p;
 	struct vev *e;
@@ -378,6 +378,10 @@ mgt_launch_child(struct cli *cli)
 		heritage.cls = mgt_cls;
 		heritage.ident = VSB_data(vident) + 1;
 
+		vext_load();
+
+		STV_Init();
+
 		VJ_subproc(JAIL_SUBPROC_WORKER);
 
 		heritage.proc_vsmw = VSMW_New(heritage.vsm_fd, 0640, "_.index");
@@ -385,7 +389,7 @@ mgt_launch_child(struct cli *cli)
 
 		/*
 		 * We pass these two params because child_main needs them
-		 * Well before it has found its own param struct.
+		 * well before it has found its own param struct.
 		 */
 		child_main(mgt_param.sigsegv_handler,
 		    mgt_param.wthread_stacksize);
@@ -416,6 +420,19 @@ mgt_launch_child(struct cli *cli)
 
 	child_std_vlu = VLU_New(child_line, NULL, 0);
 	AN(child_std_vlu);
+
+	/* Wait for cache/cache_cli.c::CLI_Run() to check in */
+	if (VCLI_ReadResult(child_cli_in, &u, NULL, mgt_param.cli_timeout)) {
+		assert(u == CLIS_COMMS);
+		pidr = waitpid(pid, &i, 0);
+		assert(pidr == pid);
+		(void)VLU_Fd(child_std_vlu, child_output);
+		MGT_Complain(C_ERR, "Child failed on launch");
+		exit(1);		// XXX Harsh ?
+	} else {
+		assert(u == CLIS_OK);
+		fprintf(stderr, "Child launched OK\n");
+	}
 
 	AZ(ev_listen);
 	e = VEV_Alloc();
@@ -706,15 +723,17 @@ mch_pid_json(struct cli *cli, const char * const *av, void *priv)
 static void v_matchproto_(cli_func_t)
 mch_cli_server_start(struct cli *cli, const char * const *av, void *priv)
 {
+	const char *err;
 
 	(void)av;
 	(void)priv;
 	if (child_state == CH_STOPPED) {
-		if (mgt_has_vcl()) {
+		err = mgt_has_vcl();
+		if (err == NULL) {
 			mgt_launch_child(cli);
 		} else {
 			VCLI_SetResult(cli, CLIS_CANT);
-			VCLI_Out(cli, "No VCL available");
+			VCLI_Out(cli, "%s", err);
 		}
 	} else {
 		VCLI_SetResult(cli, CLIS_CANT);

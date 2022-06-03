@@ -59,6 +59,38 @@ static const struct {
 #include "tbl/sess_attr.h"
 };
 
+enum sess_close {
+	SCE_NULL = 0,
+#define SESS_CLOSE(nm, stat, err, desc) SCE_##nm,
+#include "tbl/sess_close.h"
+	SCE_MAX,
+};
+
+const struct stream_close SC_NULL[1] = {{
+	.magic = STREAM_CLOSE_MAGIC,
+	.idx = SCE_NULL,
+	.is_err = 0,
+	.name = "null",
+	.desc = "Not Closing",
+}};
+
+#define SESS_CLOSE(nm, stat, err, text) \
+	const struct stream_close SC_##nm[1] = {{ \
+		.magic = STREAM_CLOSE_MAGIC, \
+		.idx = SCE_##nm, \
+		.is_err = err, \
+		.name = #nm, \
+		.desc = text, \
+	}};
+#include "tbl/sess_close.h"
+
+static const stream_close_t sc_lookup[SCE_MAX] = {
+	[SCE_NULL] = SC_NULL,
+#define SESS_CLOSE(nm, stat, err, desc) \
+	[SCE_##nm] = SC_##nm,
+#include "tbl/sess_close.h"
+};
+
 /*--------------------------------------------------------------------*/
 
 void
@@ -510,23 +542,21 @@ SES_Wait(struct sess *sp, const struct transport *xp)
  */
 
 static void
-ses_close_acct(enum sess_close reason)
+ses_close_acct(stream_close_t reason)
 {
-	int i = 0;
 
-	assert(reason != SC_NULL);
-	switch (reason) {
+	CHECK_OBJ_NOTNULL(reason, STREAM_CLOSE_MAGIC);
+	switch (reason->idx) {
 #define SESS_CLOSE(reason, stat, err, desc)		\
-	case SC_ ## reason:				\
+	case SCE_ ## reason:				\
 		VSC_C_main->sc_ ## stat++;		\
-		i = err;				\
 		break;
 #include "tbl/sess_close.h"
 
 	default:
 		WRONG("Wrong event in ses_close_acct");
 	}
-	if (i)
+	if (reason->is_err)
 		VSC_C_main->sess_closed_err++;
 }
 
@@ -537,15 +567,16 @@ ses_close_acct(enum sess_close reason)
  */
 
 void
-SES_Close(struct sess *sp, enum sess_close reason)
+SES_Close(struct sess *sp, stream_close_t reason)
 {
 	int i;
 
-	assert(reason > 0);
+	CHECK_OBJ_NOTNULL(reason, STREAM_CLOSE_MAGIC);
+	assert(reason->idx > 0);
 	assert(sp->fd > 0);
 	i = close(sp->fd);
 	assert(i == 0 || errno != EBADF); /* XXX EINVAL seen */
-	sp->fd = -(int)reason;
+	sp->fd = -reason->idx;
 	ses_close_acct(reason);
 }
 
@@ -554,10 +585,11 @@ SES_Close(struct sess *sp, enum sess_close reason)
  */
 
 void
-SES_Delete(struct sess *sp, enum sess_close reason, vtim_real now)
+SES_Delete(struct sess *sp, stream_close_t reason, vtim_real now)
 {
 
 	CHECK_OBJ_NOTNULL(sp, SESS_MAGIC);
+	CHECK_OBJ_NOTNULL(reason, STREAM_CLOSE_MAGIC);
 
 	if (reason != SC_NULL)
 		SES_Close(sp, reason);
@@ -575,11 +607,13 @@ SES_Delete(struct sess *sp, enum sess_close reason, vtim_real now)
 		now = sp->t_open; /* Do not log negatives */
 	}
 
-	if (reason == SC_NULL)
-		reason = (enum sess_close)-sp->fd;
+	if (reason == SC_NULL) {
+		assert(sp->fd < 0 && -sp->fd < SCE_MAX);
+		reason = sc_lookup[-sp->fd];
+	}
 
-	VSL(SLT_SessClose, sp->vxid, "%s %.3f",
-	    sess_close_2str(reason, 0), now - sp->t_open);
+	CHECK_OBJ_NOTNULL(reason, STREAM_CLOSE_MAGIC);
+	VSL(SLT_SessClose, sp->vxid, "%s %.3f", reason->name, now - sp->t_open);
 	VSL(SLT_End, sp->vxid, "%s", "");
 	if (WS_Overflowed(sp->ws))
 		VSC_C_main->ws_session_overflow++;
@@ -589,7 +623,7 @@ SES_Delete(struct sess *sp, enum sess_close reason, vtim_real now)
 void
 SES_DeleteHS(struct sess *sp, enum htc_status_e hs, vtim_real now)
 {
-	enum sess_close reason;
+	stream_close_t reason;
 
 	switch (hs) {
 	case HTC_S_JUNK:

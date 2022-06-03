@@ -437,9 +437,9 @@ Pool_Work_Thread(struct pool *pp, struct worker *wrk)
 				else if (wrk->wpriv->vcl == NULL)
 					tmo = 0;
 				else if (DO_DEBUG(DBG_VTC_MODE))
-					tmo =  now + 1.;
+					tmo = now + 1.;
 				else
-					tmo =  now + 60.;
+					tmo = now + 60.;
 				(void)Lck_CondWaitUntil(
 				    &wrk->cond, &pp->mtx, tmo);
 				if (wrk->task->func != NULL) {
@@ -683,7 +683,7 @@ pool_herder(void *priv)
 				Lck_Unlock(&pool_mtx);
 				delay = cache_param->wthread_destroy_delay;
 			} else
-				delay = vmax(delay, 
+				delay = vmax(delay,
 				    cache_param->wthread_destroy_delay);
 		}
 
@@ -737,6 +737,25 @@ static struct cli_proto debug_cmds[] = {
 	{ CLICMD_DEBUG_REQPOOLFAIL,		"d", debug_reqpoolfail },
 	{ NULL }
 };
+
+void
+WRK_Log(enum VSL_tag_e tag, const char *fmt, ...)
+{
+	struct worker *wrk;
+	va_list ap;
+
+	AN(fmt);
+
+	wrk = THR_GetWorker();
+	CHECK_OBJ_ORNULL(wrk, WORKER_MAGIC);
+
+	va_start(ap, fmt);
+	if (wrk != NULL && wrk->vsl != NULL)
+		VSLbv(wrk->vsl, tag, fmt, ap);
+	else
+		VSLv(tag, 0, fmt, ap);
+	va_end(ap);
+}
 
 /*--------------------------------------------------------------------
  *

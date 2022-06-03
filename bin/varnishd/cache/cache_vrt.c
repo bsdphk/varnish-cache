@@ -571,7 +571,7 @@ VRT_ValidHdr(VRT_CTX, VCL_STRANDS s)
 /*--------------------------------------------------------------------*/
 
 VCL_VOID
-VRT_UnsetHdr(VRT_CTX , VCL_HEADER hs)
+VRT_UnsetHdr(VRT_CTX, VCL_HEADER hs)
 {
 	VCL_HTTP hp;
 
@@ -584,7 +584,7 @@ VRT_UnsetHdr(VRT_CTX , VCL_HEADER hs)
 }
 
 VCL_VOID
-VRT_SetHdr(VRT_CTX , VCL_HEADER hs, const char *pfx, VCL_STRANDS s)
+VRT_SetHdr(VRT_CTX, VCL_HEADER hs, const char *pfx, VCL_STRANDS s)
 {
 	VCL_HTTP hp;
 	unsigned u, l, pl;
@@ -664,6 +664,7 @@ VRT_fail(VRT_CTX, const char *fmt, ...)
 {
 	va_list ap;
 
+	CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);
 	assert(ctx->vsl != NULL || ctx->msg != NULL);
 	AN(ctx->handling);
 	if (*ctx->handling == VCL_RET_FAIL)
@@ -719,23 +720,18 @@ VRT_r_now(VRT_CTX)
 VCL_STRING v_matchproto_()
 VRT_IP_string(VRT_CTX, VCL_IP ip)
 {
-	char *p;
-	unsigned len;
+	char buf[VTCP_ADDRBUFSIZE];
+	struct vsb vsb[1];
 
 	CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);
 	if (ip == NULL) {
 		VRT_fail(ctx, "%s: Illegal IP", __func__);
 		return (NULL);
 	}
-	len = WS_ReserveAll(ctx->ws);
-	if (len == 0) {
-		WS_Release(ctx->ws, 0);
-		return (NULL);
-	}
-	p = WS_Reservation(ctx->ws);
-	VTCP_name(ip, p, len, NULL, 0);
-	WS_Release(ctx->ws, strlen(p) + 1);
-	return (p);
+	VTCP_name(ip, buf, sizeof buf, NULL, 0);
+	WS_VSB_new(vsb, ctx->ws);
+	VSB_cat(vsb, buf);
+	return (WS_VSB_finish(vsb, ctx->ws, NULL));
 }
 
 int

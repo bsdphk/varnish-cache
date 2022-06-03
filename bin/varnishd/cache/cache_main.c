@@ -48,6 +48,8 @@
 #include "common/heritage.h"
 
 #include "vcli_serve.h"
+#include "vnum.h"
+#include "vtim.h"
 #include "vrnd.h"
 
 #include "hash/hash_slinger.h"
@@ -56,6 +58,7 @@ int cache_shutdown = 0;
 
 volatile struct params		*cache_param;
 static pthread_mutex_t		cache_vrnd_mtx;
+static vtim_dur			shutdown_delay = 0;
 
 pthread_mutexattr_t mtxattr_errorcheck;
 
@@ -219,9 +222,25 @@ cli_debug_xid(struct cli *cli, const char * const *av, void *priv)
 	(void)priv;
 	if (av[2] != NULL) {
 		vxid_base = strtoul(av[2], NULL, 0);
-		vxid_chunk = 1;
+		vxid_chunk = 0;
+		if (av[3] != NULL)
+			vxid_chunk = strtoul(av[3], NULL, 0);
+		if (vxid_chunk == 0)
+			vxid_chunk = 1;
 	}
-	VCLI_Out(cli, "XID is %u", vxid_base);
+	VCLI_Out(cli, "XID is %u chunk %u", vxid_base, vxid_chunk);
+}
+
+/*
+ * Artificially slow down the process shutdown.
+ */
+static void v_matchproto_(cli_func_t)
+cli_debug_shutdown_delay(struct cli *cli, const char * const *av, void *priv)
+{
+
+	(void)cli;
+	(void)priv;
+	shutdown_delay = VNUM_duration(av[2]);
 }
 
 /*
@@ -241,8 +260,9 @@ cli_debug_srandom(struct cli *cli, const char * const *av, void *priv)
 }
 
 static struct cli_proto debug_cmds[] = {
-	{ CLICMD_DEBUG_XID,			"d", cli_debug_xid },
-	{ CLICMD_DEBUG_SRANDOM,			"d", cli_debug_srandom },
+	{ CLICMD_DEBUG_XID,		"d", cli_debug_xid },
+	{ CLICMD_DEBUG_SHUTDOWN_DELAY,	"d", cli_debug_shutdown_delay },
+	{ CLICMD_DEBUG_SRANDOM,		"d", cli_debug_srandom },
 	{ NULL }
 };
 
@@ -392,6 +412,8 @@ child_main(int sigmagic, size_t altstksz)
 
 	ObjInit();
 
+	WRK_Init();
+
 	VCL_Init();
 	VCL_VRT_Init();
 
@@ -416,8 +438,6 @@ child_main(int sigmagic, size_t altstksz)
 
 	VMOD_Init();
 
-	WRK_Init();
-
 	BAN_Compile();
 
 	VRND_SeedAll();
@@ -434,6 +454,10 @@ child_main(int sigmagic, size_t altstksz)
 	CLI_Run();
 
 	cache_shutdown = 1;
+
+	if (shutdown_delay > 0)
+		VTIM_sleep(shutdown_delay);
+
 	VCA_Shutdown();
 	BAN_Shutdown();
 	EXP_Shutdown();

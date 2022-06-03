@@ -151,8 +151,7 @@ mk_listen_sock(const struct listen_arg *la, const struct suckaddr *sa)
 	ls->sock = -1;
 	ls->addr = VSA_Clone(sa);
 	AN(ls->addr);
-	ls->endpoint = strdup(la->endpoint);
-	AN(ls->endpoint);
+	REPLACE(ls->endpoint, la->endpoint);
 	ls->name = la->name;
 	ls->transport = la->transport;
 	ls->perms = la->perms;
@@ -202,7 +201,10 @@ mac_tcp(void *priv, const struct suckaddr *sa)
 		ls->addr = VTCP_my_suckaddr(ls->sock);
 		VTCP_myname(ls->sock, abuf, sizeof abuf,
 		    pbuf, sizeof pbuf);
-		bprintf(nbuf, "%s:%s", abuf, pbuf);
+		if (VSA_Get_Proto(sa) == AF_INET6)
+			bprintf(nbuf, "[%s]:%s", abuf, pbuf);
+		else
+			bprintf(nbuf, "%s:%s", abuf, pbuf);
 		REPLACE(ls->endpoint, nbuf);
 	}
 	VTAILQ_INSERT_TAIL(&la->socks, ls, arglist);

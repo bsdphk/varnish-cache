@@ -40,10 +40,11 @@ enum vfp_status {
 	VFP_ERROR = -1,
 	VFP_OK = 0,
 	VFP_END = 1,
-	VFP_NULL = 2,
+	VFP_NULL = 2,	// signal bypass, never returned by VFP_Suck()
 };
 
-typedef enum vfp_status vfp_init_f(struct vfp_ctx *, struct vfp_entry *);
+typedef enum vfp_status vfp_init_f(VRT_CTX, struct vfp_ctx *,
+    struct vfp_entry *);
 typedef enum vfp_status
     vfp_pull_f(struct vfp_ctx *, struct vfp_entry *, void *ptr, ssize_t *len);
 typedef void vfp_fini_f(struct vfp_ctx *, struct vfp_entry *);
@@ -91,8 +92,9 @@ struct vfp_ctx {
 enum vfp_status VFP_Suck(struct vfp_ctx *, void *p, ssize_t *lp);
 enum vfp_status VFP_Error(struct vfp_ctx *, const char *fmt, ...)
     v_printflike_(2, 3);
-void VRT_AddVFP(VRT_CTX, const struct vfp *);
-void VRT_RemoveVFP(VRT_CTX, const struct vfp *);
+
+void v_deprecated_ VRT_AddVFP(VRT_CTX, const struct vfp *);
+void v_deprecated_ VRT_RemoveVFP(VRT_CTX, const struct vfp *);
 
 /* Deliver processors ------------------------------------------------*/
 
@@ -102,7 +104,8 @@ enum vdp_action {
 	VDP_END,		/* Last buffer or after, implies VDP_FLUSH */
 };
 
-typedef int vdp_init_f(struct vdp_ctx *, void **priv, struct objcore *);
+typedef int vdp_init_f(VRT_CTX, struct vdp_ctx *, void **priv,
+    struct objcore *);
 /*
  * Return value:
  *	negative:	Error - abandon delivery
@@ -147,5 +150,10 @@ struct vdp_ctx {
 };
 
 int VDP_bytes(struct vdp_ctx *, enum vdp_action act, const void *, ssize_t);
-void VRT_AddVDP(VRT_CTX, const struct vdp *);
-void VRT_RemoveVDP(VRT_CTX, const struct vdp *);
+
+void v_deprecated_ VRT_AddVDP(VRT_CTX, const struct vdp *);
+void v_deprecated_ VRT_RemoveVDP(VRT_CTX, const struct vdp *);
+
+/* Registry functions -------------------------------------------------*/
+const char *VRT_AddFilter(VRT_CTX, const struct vfp *, const struct vdp *);
+void VRT_RemoveFilter(VRT_CTX, const struct vfp *, const struct vdp *);

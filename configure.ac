@@ -1,6 +1,6 @@
 AC_PREREQ(2.69)
 AC_COPYRIGHT([Copyright (c) 2006 Verdens Gang AS
-Copyright (c) 2006-2021 Varnish Software])
+Copyright (c) 2006-2022 Varnish Software])
 AC_REVISION([$Id$])
 AC_INIT([Varnish], [trunk], [varnish-dev@varnish-cache.org])
 AC_CONFIG_SRCDIR(include/miniobj.h)
@@ -369,17 +369,26 @@ AC_CHECK_FUNCS([setproctitle])
 # if the default libexecinfo on alpine causes issues, you can use libunwind
 AC_ARG_WITH([unwind],
             [AS_HELP_STRING([--with-unwind],
-              [use libunwind to print stacktraces (use libexecinfo otherwise). Recommended on alpine linux. Defaults to no.])])
+              [use libunwind to print stacktraces (use libexecinfo otherwise). Recommended on alpine linux. Defaults to auto.])])
 
-if test "$with_unwind" = yes; then
+if test "$with_unwind" != no; then
     case $target in
     *-*-darwin*)
         # Always present but .pc is not installed
+        have_unwind=yes
         ;;
     *)
-        PKG_CHECK_MODULES([LIBUNWIND], [libunwind])
+        PKG_CHECK_MODULES([LIBUNWIND], [libunwind], [have_unwind=yes],
+                [have_unwind=no])
         ;;
     esac
+fi
+
+if test "$with_unwind" = yes && test "$have_unwind" != yes; then
+        AC_MSG_ERROR([Could not find libunwind])
+fi
+
+if test "$have_unwind" = yes; then
     AC_DEFINE([WITH_UNWIND], [1],
               [Define to 1 to use libunwind instead of libexecinfo])
 else
@@ -388,8 +397,7 @@ else
     ])
 fi
 
-AM_CONDITIONAL([WITH_UNWIND],
-	[test "$with_unwind" = yes])
+AM_CONDITIONAL([WITH_UNWIND], [test "$have_unwind" = yes])
 
 # white lie - we don't actually test it
 AC_MSG_CHECKING([whether daemon() works])
@@ -581,6 +589,32 @@ return (0);
   ])
 if test "$ac_cv_have_tcp_keep" = yes; then
    AC_DEFINE([HAVE_TCP_KEEP], [1], [Define if OS supports TCP_KEEP* socket options])
+else
+   # Check TCP_KEEPALIVE on macOs which uses seconds as idle time unit like TCP_KEEPIDLE
+   AC_CACHE_CHECK([for TCP_KEEPALIVE socket option],
+     [ac_cv_have_tcp_keepalive],
+     [AC_RUN_IFELSE(
+     [AC_LANG_PROGRAM([[
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <errno.h>
+    ]],[[
+int s = socket(AF_INET, SOCK_STREAM, 0);
+int i = 5;
+if (s < 0)
+  return (1);
+if (setsockopt(s, IPPROTO_TCP, TCP_KEEPALIVE, &i, sizeof i))
+  return (1);
+return 0;
+    ]])],
+    [ac_cv_have_tcp_keepalive=yes],
+    [ac_cv_have_tcp_keepalive=no])
+  ])
+  if test "$ac_cv_have_tcp_keepalive" = yes; then
+     AC_DEFINE([HAVE_TCP_KEEPALIVE], [1], [Define if OS supports TCP_KEEPALIVE socket option])
+  fi
 fi
 LIBS="${save_LIBS}"
 
@@ -646,9 +680,11 @@ gl_LD_VERSION_SCRIPT
 # idiocy where write is marked as warn_unused_result, causing build
 # failures.
 
+WFLAGS=
+
 AX_CHECK_COMPILE_FLAG([-Wall],
      [CFLAGS="${CFLAGS} -Wall"
-      OCFLAGS="${OCFLAGS} -Wall"])
+      WFLAGS="${WFLAGS} -Wall"])
 
 if test "$SUNCC" = "yes" ; then
     SUNCC_CFLAGS=" \
@@ -657,27 +693,27 @@ if test "$SUNCC" = "yes" ; then
 	"
     AX_CHECK_COMPILE_FLAG([${SUNCC_CFLAGS}],
 	[CFLAGS="${CFLAGS} ${SUNCC_CFLAGS}"
-	 OCFLAGS="${OCFLAGS} ${SUNCC_CFLAGS}"])
+	 WFLAGS="${WFLAGS} ${SUNCC_CFLAGS}"])
 else
     AX_CHECK_COMPILE_FLAG([-Werror],
 	[CFLAGS="${CFLAGS} -Werror"
-	 OCFLAGS="${OCFLAGS} -Werror"])
+	 WFLAGS="${WFLAGS} -Werror"])
 fi
 
 case $target in
     *-*-darwin*)
 	AX_CHECK_COMPILE_FLAG([-Wno-expansion-to-defined],
 	[CFLAGS="${CFLAGS} -Wno-expansion-to-defined"
-	 OCFLAGS="${OCFLAGS} -Wno-expansion-to-defined"])
+	 WFLAGS="${WFLAGS} -Wno-expansion-to-defined"])
 	;;
 esac
 
 AX_CHECK_COMPILE_FLAG([-Werror=unused-result],
     [CFLAGS="${CFLAGS} -Wno-error=unused-result"
-     OCFLAGS="${OCFLAGS} -Wno-error=unused-result"],
+     WFLAGS="${WFLAGS} -Wno-error=unused-result"],
     [AX_CHECK_COMPILE_FLAG([-Wunused-result],
      [CFLAGS="${CFLAGS} -Wno-unused-result"
-      OCFLAGS="${OCFLAGS} -Wno-unused-result"])])
+      WFLAGS="${WFLAGS} -Wno-unused-result"])])
 
 # This corresponds to FreeBSD's WARNS level 6
 DEVELOPER_CFLAGS=`$PYTHON $srcdir/wflags.py`
@@ -713,7 +749,7 @@ if test "x$SUNCC" != "xyes" && test "x$enable_developer_warnings" != "xno"; then
 		[])
 
 	CFLAGS="${CFLAGS} ${DEVELOPER_CFLAGS}"
-	OCFLAGS="${OCFLAGS} ${DEVELOPER_CFLAGS}"
+	WFLAGS="${WFLAGS} ${DEVELOPER_CFLAGS}"
 fi
 
 # gcc on solaris needs -fstack-protector when calling gcc in linker
@@ -793,27 +829,54 @@ if test "$ac_cv_env_VCC_CC_set" = "set"; then
 	VCC_CC="$ac_cv_env_VCC_CC_value"
 else
 	case $target in
+	*-*-darwin*)
+		VCC_CC="cc $OCFLAGS"
+		;;
+	*)
+		VCC_CC="$PTHREAD_CC $OCFLAGS"
+		;;
+	esac
+
+	save_CFLAGS="$CFLAGS"
+	save_CC="$CC"
+	CFLAGS=
+	CC="$VCC_CC"
+	AX_CHECK_COMPILE_FLAG(
+		[-fno-var-tracking-assignments],
+		[VCC_CC="$VCC_CC -fno-var-tracking-assignments"])
+	CFLAGS="$save_CFLAGS"
+	CC="$save_CC"
+
+	case $target in
 	*-*-solaris*)
 		case $PTHREAD_CC in
 		*gcc*)
-			VCC_CC="$PTHREAD_CC $OCFLAGS $PTHREAD_CFLAGS -fpic -shared -o %o %s"
-			break
+			VCC_CC="exec $VCC_CC %w $PTHREAD_CFLAGS -fpic -shared -o %o %s"
 			;;
 		*cc)
-			VCC_CC="$PTHREAD_CC $OCFLAGS -errwarn=%all,no%E_STATEMENT_NOT_REACHED $PTHREAD_CFLAGS -Kpic -G -o %o %s"
+			VCC_CC="exec $VCC_CC %w -errwarn=%%all,no%%E_STATEMENT_NOT_REACHED $PTHREAD_CFLAGS -Kpic -G -o %o %s"
 			;;
 		esac
 		;;
 	*-*-darwin*)
-		VCC_CC="exec cc $OCFLAGS -dynamiclib -Wl,-undefined,dynamic_lookup -o %o %s"
+		VCC_CC="exec $VCC_CC %w -dynamiclib -Wl,-undefined,dynamic_lookup -o %o %s"
 		;;
 	*)
-		VCC_CC="exec $PTHREAD_CC $OCFLAGS $PTHREAD_CFLAGS $SAN_CFLAGS -fpic -shared -Wl,-x -o %o %s"
+		VCC_CC="exec $VCC_CC %w $PTHREAD_CFLAGS $SAN_CFLAGS -fpic -shared -Wl,-x -o %o %s"
 		;;
 	esac
 fi
 
+if test "$ac_cv_env_VCC_WARN_set" = set; then
+	VCC_WARN=$ac_cv_env_VCC_WARN_value
+else
+	VCC_WARN=$WFLAGS
+fi
+
+OCFLAGS="$OCFLAGS $WFLAGS"
+
 AC_DEFINE_UNQUOTED([VCC_CC],"$VCC_CC",[C compiler command line for VCL code])
+AC_DEFINE_UNQUOTED([VCC_WARN],"$VCC_WARN",[C compiler warnings for VCL code])
 
 # Stupid automake needs this
 VTC_TESTS="$(cd $srcdir/bin/varnishtest && echo tests/*.vtc)"

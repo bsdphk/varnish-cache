@@ -57,129 +57,142 @@ struct vfilter {
 	VTAILQ_ENTRY(vfilter)		list;
 };
 
-static struct vfilter_head vfp_filters =
-    VTAILQ_HEAD_INITIALIZER(vfp_filters);
+static struct vfilter_head vrt_filters =
+    VTAILQ_HEAD_INITIALIZER(vrt_filters);
 
-static struct vfilter_head vdp_filters =
-    VTAILQ_HEAD_INITIALIZER(vdp_filters);
-
-void
-VRT_AddVFP(VRT_CTX, const struct vfp *filter)
+static const char *
+is_dup_filter(const struct vfilter_head *head, const struct vfp * vfp,
+    const struct vdp *vdp, const char *name)
 {
 	struct vfilter *vp;
-	struct vfilter_head *hd = &vfp_filters;
+	VTAILQ_FOREACH(vp, head, list) {
+		if (vfp != NULL && vp->vfp != NULL) {
+			if (vp->vfp == vfp)
+				return ("VFP already registered");
+			if (!strcasecmp(vp->name, name))
+				return ("VFP name already used");
+		}
+		if (vdp != NULL && vp->vdp != NULL) {
+			if (vp->vdp == vdp)
+				return ("VDP already registered");
+			if (!strcasecmp(vp->name, name))
+				return ("VDP name already used");
+		}
+	}
+	return (NULL);
+}
+
+static const char *
+vrt_addfilter(VRT_CTX, const struct vfp *vfp, const struct vdp *vdp)
+{
+	struct vfilter *vp;
+	struct vfilter_head *hd = &vrt_filters;
+	const char *err, *name = NULL;
 
 	CHECK_OBJ_ORNULL(ctx, VRT_CTX_MAGIC);
-	AN(filter);
-	AN(filter->name);
-	AN(*filter->name);
+	assert(vfp != NULL || vdp != NULL);
+	assert(vfp == NULL || vfp->name != NULL);
+	assert(vdp == NULL || vdp->name != NULL);
+	assert(vfp == NULL || vdp == NULL || !strcasecmp(vfp->name, vdp->name));
+	if (vfp != NULL)
+		name = vfp->name;
+	else if (vdp != NULL)
+		name = vdp->name;
+	AN(name);
 
-	VTAILQ_FOREACH(vp, hd, list) {
-		xxxassert(vp->vfp != filter);
-		xxxassert(strcasecmp(vp->name, filter->name));
+	err = is_dup_filter(hd, vfp, vdp, name);
+	if (err != NULL) {
+		if (ctx != NULL)
+			VRT_fail(ctx, "%s (global)", err);
+		return (err);
 	}
 	if (ctx != NULL) {
 		ASSERT_CLI();
 		CHECK_OBJ_NOTNULL(ctx->vcl, VCL_MAGIC);
-		hd = &ctx->vcl->vfps;
-		VTAILQ_FOREACH(vp, hd, list) {
-			xxxassert(vp->vfp != filter);
-			xxxassert(strcasecmp(vp->name, filter->name));
+		hd = &ctx->vcl->filters;
+		err = is_dup_filter(hd, vfp, vdp, name);
+		if (err != NULL) {
+			VRT_fail(ctx, "%s (per-vcl)", err);
+			return (err);
 		}
 	}
+
 	ALLOC_OBJ(vp, VFILTER_MAGIC);
 	AN(vp);
-	vp->vfp = filter;
-	vp->name = filter->name;
-	vp->nlen = strlen(vp->name);
+	vp->vfp = vfp;
+	vp->vdp = vdp;
+	vp->name = name;
+	vp->nlen = strlen(name);
 	VTAILQ_INSERT_TAIL(hd, vp, list);
+	return(err);
+}
+
+const char *
+VRT_AddFilter(VRT_CTX, const struct vfp *vfp, const struct vdp *vdp)
+{
+
+	CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);
+	return (vrt_addfilter(ctx, vfp, vdp));
+}
+
+void
+VRT_AddVFP(VRT_CTX, const struct vfp *filter)
+{
+	AZ(VRT_AddFilter(ctx, filter, NULL));
 }
 
 void
 VRT_AddVDP(VRT_CTX, const struct vdp *filter)
 {
+	AZ(VRT_AddFilter(ctx, NULL, filter));
+}
+
+void
+VRT_RemoveFilter(VRT_CTX, const struct vfp *vfp, const struct vdp *vdp)
+{
 	struct vfilter *vp;
-	struct vfilter_head *hd = &vdp_filters;
+	struct vfilter_head *hd;
 
-	CHECK_OBJ_ORNULL(ctx, VRT_CTX_MAGIC);
-	AN(filter);
-	AN(filter->name);
-	AN(*filter->name);
+	CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);
+	CHECK_OBJ_NOTNULL(ctx->vcl, VCL_MAGIC);
+	hd = &ctx->vcl->filters;
+	assert(vfp != NULL || vdp != NULL);
+	assert(vfp == NULL || vfp->name != NULL);
+	assert(vdp == NULL || vdp->name != NULL);
+	assert(vfp == NULL || vdp == NULL || !strcasecmp(vfp->name, vdp->name));
 
+	ASSERT_CLI();
 	VTAILQ_FOREACH(vp, hd, list) {
-		xxxassert(vp->vdp != filter);
-		xxxassert(strcasecmp(vp->name, filter->name));
+		CHECK_OBJ_NOTNULL(vp, VFILTER_MAGIC);
+		if (vp->vfp == vfp && vp->vdp == vdp)
+			break;
 	}
-	if (ctx != NULL) {
-		ASSERT_CLI();
-		CHECK_OBJ_NOTNULL(ctx->vcl, VCL_MAGIC);
-		hd = &ctx->vcl->vdps;
-		VTAILQ_FOREACH(vp, hd, list) {
-			xxxassert(vp->vdp != filter);
-			xxxassert(strcasecmp(vp->name, filter->name));
-		}
-	}
-	ALLOC_OBJ(vp, VFILTER_MAGIC);
 	AN(vp);
-	vp->vdp = filter;
-	vp->name = filter->name;
-	vp->nlen = strlen(vp->name);
-	VTAILQ_INSERT_TAIL(hd, vp, list);
+	assert(vfp == NULL || !strcasecmp(vfp->name, vp->name));
+	assert(vdp == NULL || !strcasecmp(vdp->name, vp->name));
+	VTAILQ_REMOVE(hd, vp, list);
+	FREE_OBJ(vp);
 }
 
 void
 VRT_RemoveVFP(VRT_CTX, const struct vfp *filter)
 {
-	struct vfilter *vp;
-	struct vfilter_head *hd;
 
-	CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);
-	CHECK_OBJ_NOTNULL(ctx->vcl, VCL_MAGIC);
-	hd = &ctx->vcl->vfps;
-	AN(filter);
-	AN(filter->name);
-	AN(*filter->name);
-
-	ASSERT_CLI();
-	VTAILQ_FOREACH(vp, hd, list) {
-		CHECK_OBJ_NOTNULL(vp, VFILTER_MAGIC);
-		if (vp->vfp == filter)
-			break;
-	}
-	XXXAN(vp);
-	VTAILQ_REMOVE(hd, vp, list);
-	FREE_OBJ(vp);
+	VRT_RemoveFilter(ctx, filter, NULL);
 }
 
 void
 VRT_RemoveVDP(VRT_CTX, const struct vdp *filter)
 {
-	struct vfilter *vp;
-	struct vfilter_head *hd;
 
-	CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);
-	CHECK_OBJ_NOTNULL(ctx->vcl, VCL_MAGIC);
-	hd = &ctx->vcl->vdps;
-	AN(filter);
-	AN(filter->name);
-	AN(*filter->name);
-
-	ASSERT_CLI();
-	VTAILQ_FOREACH(vp, hd, list) {
-		CHECK_OBJ_NOTNULL(vp, VFILTER_MAGIC);
-		if (vp->vdp == filter)
-			break;
-	}
-	XXXAN(vp);
-	VTAILQ_REMOVE(hd, vp, list);
-	FREE_OBJ(vp);
+	VRT_RemoveFilter(ctx, NULL, filter);
 }
 
 static const struct vfilter vfilter_error[1];
 
 // XXX: idea(fgs): Allow filters (...) arguments in the list
 static const struct vfilter *
-vcl_filter_list_iter(const struct vfilter_head *h1,
+vcl_filter_list_iter(int want_vfp, const struct vfilter_head *h1,
     const struct vfilter_head *h2, const char **flp)
 {
 	const char *fl, *q;
@@ -201,12 +214,22 @@ vcl_filter_list_iter(const struct vfilter_head *h1,
 	for (q = fl; *q && !vct_isspace(*q); q++)
 		continue;
 	*flp = q;
-	VTAILQ_FOREACH(vp, h1, list)
+	VTAILQ_FOREACH(vp, h1, list) {
+		if (want_vfp && vp->vfp == NULL)
+			continue;
+		else if (!want_vfp && vp->vdp == NULL)
+			continue;
 		if (vp->nlen == q - fl && !memcmp(fl, vp->name, vp->nlen))
 			return (vp);
-	VTAILQ_FOREACH(vp, h2, list)
+	}
+	VTAILQ_FOREACH(vp, h2, list) {
+		if (want_vfp && vp->vfp == NULL)
+			continue;
+		else if (!want_vfp && vp->vdp == NULL)
+			continue;
 		if (vp->nlen == q - fl && !memcmp(fl, vp->name, vp->nlen))
 			return (vp);
+	}
 	*flp = fl;
 	return (vfilter_error);
 }
@@ -220,7 +243,7 @@ VCL_StackVFP(struct vfp_ctx *vc, const struct vcl *vcl, const char *fl)
 	VSLb(vc->wrk->vsl, SLT_Filters, "%s", fl);
 
 	while (1) {
-		vp = vcl_filter_list_iter(&vfp_filters, &vcl->vfps, &fl);
+		vp = vcl_filter_list_iter(1, &vrt_filters, &vcl->filters, &fl);
 		if (vp == NULL)
 			return (0);
 		if (vp == vfilter_error)
@@ -234,11 +257,15 @@ int
 VCL_StackVDP(struct req *req, const struct vcl *vcl, const char *fl)
 {
 	const struct vfilter *vp;
+	struct vrt_ctx ctx[1];
 
 	AN(fl);
 	VSLb(req->vsl, SLT_Filters, "%s", fl);
+	INIT_OBJ(ctx, VRT_CTX_MAGIC);
+	VCL_Req2Ctx(ctx, req);
+
 	while (1) {
-		vp = vcl_filter_list_iter(&vdp_filters, &vcl->vdps, &fl);
+		vp = vcl_filter_list_iter(0, &vrt_filters, &vcl->filters, &fl);
 		if (vp == NULL)
 			return (0);
 		if (vp == vfilter_error) {
@@ -246,7 +273,7 @@ VCL_StackVDP(struct req *req, const struct vcl *vcl, const char *fl)
 			    "Filter '...%s' not found", fl);
 			return (-1);
 		}
-		if (VDP_Push(req->vdc, req->ws, vp->vdp, NULL))
+		if (VDP_Push(ctx, req->vdc, req->ws, vp->vdp, NULL))
 			return (-1);
 	}
 }
@@ -254,14 +281,14 @@ VCL_StackVDP(struct req *req, const struct vcl *vcl, const char *fl)
 void
 VCL_VRT_Init(void)
 {
-	VRT_AddVFP(NULL, &VFP_testgunzip);
-	VRT_AddVFP(NULL, &VFP_gunzip);
-	VRT_AddVFP(NULL, &VFP_gzip);
-	VRT_AddVFP(NULL, &VFP_esi);
-	VRT_AddVFP(NULL, &VFP_esi_gzip);
-	VRT_AddVDP(NULL, &VDP_esi);
-	VRT_AddVDP(NULL, &VDP_gunzip);
-	VRT_AddVDP(NULL, &VDP_range);
+	AZ(vrt_addfilter(NULL, &VFP_testgunzip, NULL));
+	AZ(vrt_addfilter(NULL, &VFP_gunzip, NULL));
+	AZ(vrt_addfilter(NULL, &VFP_gzip, NULL));
+	AZ(vrt_addfilter(NULL, &VFP_esi, NULL));
+	AZ(vrt_addfilter(NULL, &VFP_esi_gzip, NULL));
+	AZ(vrt_addfilter(NULL, NULL, &VDP_esi));
+	AZ(vrt_addfilter(NULL, NULL, &VDP_gunzip));
+	AZ(vrt_addfilter(NULL, NULL, &VDP_range));
 }
 
 /*--------------------------------------------------------------------

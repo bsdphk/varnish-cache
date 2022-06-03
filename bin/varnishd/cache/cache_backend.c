@@ -54,9 +54,6 @@
 
 static const char * const vbe_proto_ident = "HTTP Backend";
 
-static VTAILQ_HEAD(, backend) backends = VTAILQ_HEAD_INITIALIZER(backends);
-static VTAILQ_HEAD(, backend) cool_backends =
-    VTAILQ_HEAD_INITIALIZER(cool_backends);
 static struct lock backends_mtx;
 
 /*--------------------------------------------------------------------*/
@@ -129,7 +126,7 @@ vbe_dir_getfd(VRT_CTX, struct worker *wrk, VCL_BACKEND dir, struct backend *bp,
 	CHECK_OBJ_NOTNULL(bp, BACKEND_MAGIC);
 	AN(bp->vsc);
 
-	if (! VRT_Healthy(ctx, dir, NULL)) {
+	if (!VRT_Healthy(ctx, dir, NULL)) {
 		VSLb(bo->vsl, SLT_FetchError,
 		     "backend %s: unhealthy", VRT_BACKEND_string(dir));
 		bp->vsc->unhealthy++;
@@ -153,6 +150,7 @@ vbe_dir_getfd(VRT_CTX, struct worker *wrk, VCL_BACKEND dir, struct backend *bp,
 		return (NULL);
 	}
 	bo->htc->doclose = SC_NULL;
+	CHECK_OBJ_NOTNULL(bo->htc->doclose, STREAM_CLOSE_MAGIC);
 
 	FIND_TMO(connect_timeout, tmod, bo, bp);
 	pfd = VCP_Get(bp->conn_pool, tmod, wrk, force_fresh, &err);
@@ -178,6 +176,8 @@ vbe_dir_getfd(VRT_CTX, struct worker *wrk, VCL_BACKEND dir, struct backend *bp,
 	bp->vsc->conn++;
 	bp->vsc->req++;
 	Lck_Unlock(bp->director->mtx);
+
+	CHECK_OBJ_NOTNULL(bo->htc->doclose, STREAM_CLOSE_MAGIC);
 
 	err = 0;
 	if (bp->proxy_header != 0)
@@ -210,6 +210,7 @@ vbe_dir_getfd(VRT_CTX, struct worker *wrk, VCL_BACKEND dir, struct backend *bp,
 	INIT_OBJ(bo->htc, HTTP_CONN_MAGIC);
 	bo->htc->priv = pfd;
 	bo->htc->rfd = fdp;
+	bo->htc->doclose = SC_NULL;
 	FIND_TMO(first_byte_timeout,
 	    bo->htc->first_byte_timeout, bo, bp);
 	FIND_TMO(between_bytes_timeout,
@@ -231,13 +232,13 @@ vbe_dir_finish(VRT_CTX, VCL_BACKEND d)
 	CAST_OBJ_NOTNULL(bp, d->priv, BACKEND_MAGIC);
 
 	CHECK_OBJ_NOTNULL(bo->htc, HTTP_CONN_MAGIC);
+	CHECK_OBJ_NOTNULL(bo->htc->doclose, STREAM_CLOSE_MAGIC);
+
 	pfd = bo->htc->priv;
 	bo->htc->priv = NULL;
-	if (PFD_State(pfd) != PFD_STATE_USED)
-		AN(bo->htc->doclose);
 	if (bo->htc->doclose != SC_NULL || bp->proxy_header != 0) {
-		VSLb(bo->vsl, SLT_BackendClose, "%d %s close", *PFD_Fd(pfd),
-		    VRT_BACKEND_string(d));
+		VSLb(bo->vsl, SLT_BackendClose, "%d %s close %s", *PFD_Fd(pfd),
+		    VRT_BACKEND_string(d), bo->htc->doclose->desc);
 		VCP_Close(&pfd);
 		AZ(pfd);
 		Lck_Lock(bp->director->mtx);
@@ -272,6 +273,8 @@ vbe_dir_gethdrs(VRT_CTX, VCL_BACKEND d)
 	CHECK_OBJ_NOTNULL(d, DIRECTOR_MAGIC);
 	bo = ctx->bo;
 	CHECK_OBJ_NOTNULL(bo, BUSYOBJ_MAGIC);
+	if (bo->htc != NULL)
+		CHECK_OBJ_NOTNULL(bo->htc->doclose, STREAM_CLOSE_MAGIC);
 	wrk = ctx->bo->wrk;
 	CHECK_OBJ_NOTNULL(wrk, WORKER_MAGIC);
 	CAST_OBJ_NOTNULL(bp, d->priv, BACKEND_MAGIC);
@@ -285,10 +288,13 @@ vbe_dir_gethdrs(VRT_CTX, VCL_BACKEND d)
 		http_PrintfHeader(bo->bereq, "Host: %s", bp->hosthdr);
 
 	do {
+		if (bo->htc != NULL)
+			CHECK_OBJ_NOTNULL(bo->htc->doclose, STREAM_CLOSE_MAGIC);
 		pfd = vbe_dir_getfd(ctx, wrk, d, bp, extrachance == 0 ? 1 : 0);
 		if (pfd == NULL)
 			return (-1);
 		AN(bo->htc);
+		CHECK_OBJ_NOTNULL(bo->htc->doclose, STREAM_CLOSE_MAGIC);
 		if (PFD_State(pfd) != PFD_STATE_STOLEN)
 			extrachance = 0;
 
@@ -314,6 +320,7 @@ vbe_dir_gethdrs(VRT_CTX, VCL_BACKEND d)
 				return (0);
 			}
 		}
+		CHECK_OBJ_NOTNULL(bo->htc->doclose, STREAM_CLOSE_MAGIC);
 
 		/*
 		 * If we recycled a backend connection, there is a finite chance
@@ -347,11 +354,11 @@ vbe_dir_getip(VRT_CTX, VCL_BACKEND d)
 
 /*--------------------------------------------------------------------*/
 
-static enum sess_close v_matchproto_(vdi_http1pipe_f)
+static stream_close_t v_matchproto_(vdi_http1pipe_f)
 vbe_dir_http1pipe(VRT_CTX, VCL_BACKEND d)
 {
 	int i;
-	enum sess_close retval;
+	stream_close_t retval;
 	struct backend *bp;
 	struct v1p_acct v1a;
 	struct pfd *pfd;
@@ -387,6 +394,7 @@ vbe_dir_http1pipe(VRT_CTX, VCL_BACKEND d)
 		retval = SC_TX_PIPE;
 	}
 	V1P_Charge(ctx->req, &v1a, bp->vsc);
+	CHECK_OBJ_NOTNULL(retval, STREAM_CLOSE_MAGIC);
 	return (retval);
 }
 
@@ -408,6 +416,8 @@ vbe_dir_event(const struct director *d, enum vcl_event_e ev)
 		if (bp->probe != NULL)
 			VBP_Control(bp, 0);
 		VRT_VSC_Hide(bp->vsc_seg);
+	} else if (ev == VCL_EVENT_DISCARD) {
+		VRT_DelDirector(&bp->director);
 	}
 }
 
@@ -424,13 +434,9 @@ vbe_free(struct backend *be)
 
 	VSC_vbe_Destroy(&be->vsc_seg);
 	Lck_Lock(&backends_mtx);
-	if (be->cooled > 0)
-		VTAILQ_REMOVE(&cool_backends, be, list);
-	else
-		VTAILQ_REMOVE(&backends, be, list);
 	VSC_C_main->n_backend--;
-	VCP_Rel(&be->conn_pool);
 	Lck_Unlock(&backends_mtx);
+	VCP_Rel(&be->conn_pool);
 
 #define DA(x)	do { if (be->x != NULL) free(be->x); } while (0)
 #define DN(x)	/**/
@@ -628,21 +634,19 @@ VRT_new_backend_clustered(VRT_CTX, struct vsmw_cluster *vc,
 	}
 
 	Lck_Lock(&backends_mtx);
-	VTAILQ_INSERT_TAIL(&backends, be, list);
 	VSC_C_main->n_backend++;
 	Lck_Unlock(&backends_mtx);
 
 	be->director = VRT_AddDirector(ctx, m, be, "%s", vrt->vcl_name);
 
-	if (be->director != NULL) {
-		/* for cold VCL, update initial director state */
-		if (be->probe != NULL && ! vcl->temp->is_warm)
-			VBP_Update_Backend(be->probe);
-		return (be->director);
+	if (be->director == NULL) {
+		vbe_free(be);
+		return (NULL);
 	}
-
-	vbe_free(be);
-	return (NULL);
+	/* for cold VCL, update initial director state */
+	if (be->probe != NULL)
+		VBP_Update_Backend(be->probe);
+	return (be->director);
 }
 
 VCL_BACKEND
@@ -662,47 +666,11 @@ VRT_new_backend(VRT_CTX, const struct vrt_backend *vrt)
 void
 VRT_delete_backend(VRT_CTX, VCL_BACKEND *dp)
 {
-	VCL_BACKEND d;
-	struct backend *be;
 
-	CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);
-	TAKE_OBJ_NOTNULL(d, dp, DIRECTOR_MAGIC);
-	CAST_OBJ_NOTNULL(be, d->priv, BACKEND_MAGIC);
-	Lck_Lock(be->director->mtx);
-	VRT_DisableDirector(be->director);
-	Lck_Unlock(be->director->mtx);
-	Lck_Lock(&backends_mtx);
-	AZ(be->cooled);
-	be->cooled = VTIM_real() + 60.;
-	VTAILQ_REMOVE(&backends, be, list);
-	VTAILQ_INSERT_TAIL(&cool_backends, be, list);
-	Lck_Unlock(&backends_mtx);
-
-	// NB. The backend is still usable for the ongoing transactions,
-	// this is why we don't bust the director's magic number.
-}
-
-/*---------------------------------------------------------------------*/
-
-void
-VBE_Poll(void)
-{
-	struct backend *be, *be2;
-	vtim_real now = VTIM_real();
-
-	ASSERT_CLI();
-	Lck_Lock(&backends_mtx);
-	VTAILQ_FOREACH_SAFE(be, &cool_backends, list, be2) {
-		CHECK_OBJ_NOTNULL(be, BACKEND_MAGIC);
-		if (be->cooled > now)
-			break;
-		if (be->n_conn > 0)
-			continue;
-		Lck_Unlock(&backends_mtx);
-		VRT_DelDirector(&be->director);
-		Lck_Lock(&backends_mtx);
-	}
-	Lck_Unlock(&backends_mtx);
+	(void)ctx;
+	CHECK_OBJ_NOTNULL(*dp, DIRECTOR_MAGIC);
+	VRT_DisableDirector(*dp);
+	VRT_Assign_Backend(dp, NULL);
 }
 
 /*---------------------------------------------------------------------*/

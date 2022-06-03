@@ -31,12 +31,12 @@
 
 /*lint -save -e525 -e539 */
 
-// enum sess_close	  sc_* stat	is_err	Description
+// stream_close_t	  sc_* stat	is_err	Description
 SESS_CLOSE(REM_CLOSE,	  rem_close,	0,	"Client Closed")
 SESS_CLOSE(REQ_CLOSE,	  req_close,	0,	"Client requested close")
 SESS_CLOSE(REQ_HTTP10,	  req_http10,	1,	"Proto < HTTP/1.1")
 SESS_CLOSE(RX_BAD,	  rx_bad,	1,	"Received bad req/resp")
-SESS_CLOSE(RX_BODY,	  rx_body,	1,	"Failure receiving req.body")
+SESS_CLOSE(RX_BODY,	  rx_body,	1,	"Failure receiving body")
 SESS_CLOSE(RX_JUNK,	  rx_junk,	1,	"Received junk data")
 SESS_CLOSE(RX_OVERFLOW,   rx_overflow,	1,	"Received buffer overflow")
 SESS_CLOSE(RX_TIMEOUT,	  rx_timeout,	1,	"Receive timeout")

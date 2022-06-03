@@ -36,12 +36,19 @@
 
 /*lint -save -e525 -e539 -e835 */
 
-/*--------------------------------------------------------------------
- *  * Simple parameters
- *   */
+#ifndef PARAM_ALL
+#  define PARAM_PRE
+#  define PARAM_POST
+#endif
 
-#define PARAM_SIMPLE(nm, typ, ...) \
-	PARAM(typ, nm, nm, tweak_##typ, &mgt_param.nm, __VA_ARGS__)
+/*--------------------------------------------------------------------
+ * Simple parameters
+ */
+
+#define PARAM_SIMPLE(nm, typ, ...)					\
+	PARAM_PRE							\
+	PARAM(typ, nm, nm, tweak_##typ, &mgt_param.nm, __VA_ARGS__)	\
+	PARAM_POST
 
 #if defined(PLATFORM_FLAGS)
 #  error "Temporary macro PLATFORM_FLAGS already defined"
@@ -325,7 +332,7 @@ PARAM_SIMPLE(
 	/* def */	"60.000",
 	/* units */	"seconds",
 	/* descr */
-	"Timeout for the childs replies to CLI requests from the "
+	"Timeout for the child's replies to CLI requests from the "
 	"mgt_param."
 )
 
@@ -385,13 +392,16 @@ PARAM_SIMPLE(
 	/* type */	timeout,
 	/* min */	"0.000",
 	/* max */	NULL,
-	/* def */	"10.000",
+	/* def */	"10s",
 	/* units */	"seconds",
 	/* descr */
 	"Default grace period.  We will deliver an object this long after "
 	"it has expired, provided another thread is attempting to get a "
 	"new copy.",
-	/* flags */	OBJ_STICKY
+	/* flags */	OBJ_STICKY,
+	/* dyn_min_reason */	NULL,
+	/* dyn_max_reason */	NULL,
+	/* dyn_def_reason */	"10s"
 )
 
 PARAM_SIMPLE(
@@ -399,14 +409,17 @@ PARAM_SIMPLE(
 	/* type */	timeout,
 	/* min */	"0.000",
 	/* max */	NULL,
-	/* def */	"0.000",
+	/* def */	"0s",
 	/* units */	"seconds",
 	/* descr */
 	"Default keep period.  We will keep a useless object around this "
 	"long, making it available for conditional backend fetches.  That "
 	"means that the object will be removed from the cache at the end "
 	"of ttl+grace+keep.",
-	/* flags */	OBJ_STICKY
+	/* flags */	OBJ_STICKY,
+	/* dyn_min_reason */	NULL,
+	/* dyn_max_reason */	NULL,
+	/* dyn_def_reason */	"0s"
 )
 
 PARAM_SIMPLE(
@@ -414,12 +427,15 @@ PARAM_SIMPLE(
 	/* type */	timeout,
 	/* min */	"0.000",
 	/* max */	NULL,
-	/* def */	"120.000",
+	/* def */	"2m",
 	/* units */	"seconds",
 	/* descr */
 	"The TTL assigned to objects if neither the backend nor the VCL "
 	"code assigns one.",
-	/* flags */	OBJ_STICKY
+	/* flags */	OBJ_STICKY,
+	/* dyn_min_reason */	NULL,
+	/* dyn_max_reason */	NULL,
+	/* dyn_def_reason */	"2m"
 )
 
 PARAM_SIMPLE(
@@ -1021,7 +1037,7 @@ PARAM_SIMPLE(
 	/* name */	vsl_reclen,
 	/* type */	vsl_reclen,
 	/* min */	"16b",
-	/* max */	NULL,
+	/* max */	"65535b",	// VSL_LENMASK
 	/* def */	"255b",
 	/* units */	"bytes",
 	/* descr */
@@ -1167,7 +1183,8 @@ PARAM_SIMPLE(
 /* We have a strict min at the protocol default here. This is because we
  * don't have the 'use settings only after peer ack' in place yet. If the
  * value is lower than the protocol default, the very first stream could
- * get a flow control error. */
+ * get a flow control error.
+ */
 PARAM_SIMPLE(
 	/* name */	h2_initial_window_size,
 	/* type */	bytes_u,
@@ -1206,13 +1223,15 @@ PARAM_SIMPLE(
  */
 
 #define PARAM_MEMPOOL(nm, def, descr)					\
+	PARAM_PRE							\
 	PARAM(poolparam, nm, nm, tweak_poolparam, &mgt_param.nm,	\
 	    NULL, NULL, def, NULL,					\
 	    descr							\
 	    "The three numbers are:\n"					\
 	    "\tmin_pool\tminimum size of free pool.\n"			\
 	    "\tmax_pool\tmaximum size of free pool.\n"			\
-	    "\tmax_age\tmax age of free element.")
+	    "\tmax_age\tmax age of free element.")			\
+	PARAM_POST
 
 PARAM_MEMPOOL(
 		/* name */	pool_req,
@@ -1240,8 +1259,10 @@ PARAM_MEMPOOL(
  */
 
 #define PARAM_THREAD(nm, fld, typ, ...)			\
+	PARAM_PRE					\
 	PARAM(typ, wthread_ ## fld, nm, tweak_ ## typ,	\
-	    &mgt_param.wthread_ ## fld, __VA_ARGS__)
+	    &mgt_param.wthread_ ## fld, __VA_ARGS__)	\
+	PARAM_POST
 
 PARAM_THREAD(
 	/* name */	thread_pools,
@@ -1520,8 +1541,10 @@ PARAM_THREAD(
  * String parameters
  */
 
-#  define PARAM_STRING(nm, tw, pv, def, ...) \
-	PARAM(, , nm, tw, pv, NULL, NULL, def, NULL, __VA_ARGS__)
+#  define PARAM_STRING(nm, tw, pv, def, ...)				\
+	PARAM_PRE							\
+	PARAM(, , nm, tw, pv, NULL, NULL, def, NULL, __VA_ARGS__)	\
+	PARAM_POST
 
 PARAM_STRING(
 	/* name */	cc_command,
@@ -1529,11 +1552,42 @@ PARAM_STRING(
 	/* priv */	&mgt_cc_cmd,
 	/* def */	VCC_CC,
 	/* descr */
-	"Command used for compiling the C source code to a "
-	"dlopen(3) loadable object.  Any occurrence of %s in "
-	"the string will be replaced with the source file name, "
-	"and %o will be replaced with the output file name.",
-	/* flags */	MUST_RELOAD
+	"The command used for compiling the C source code to a "
+	"dlopen(3) loadable object. The following expansions can "
+	"be used:\n\n"
+	"- %s: the source file name\n"
+	"- %o: the output file name\n"
+	"- %w: the cc_warnings parameter\n"
+	"- %d: the raw default cc_command\n"
+	"- %D: the expanded default cc_command\n"
+	"- %n: the working directory (-n option)\n"
+	"- %%: a percent sign\n"
+	"\n"
+	"Unknown percent expansion sequences are ignored, and to "
+	"avoid future incompatibilities percent characters should "
+	"be escaped with a double percent sequence.\n\n"
+	"The %d and %D expansions allow passing the parameter's "
+	"default value to a wrapper script to perform additional "
+	"processing.",
+	/* flags */	MUST_RELOAD | BUILD_OPTIONS,
+	/* dyn_min_reason */	NULL,
+	/* dyn_max_reason */	NULL,
+	/* dyn_def_reason */	"exec $CC $CFLAGS %w -shared -o %o %s"
+)
+
+PARAM_STRING(
+	/* name */	cc_warnings,
+	/* tweak */	tweak_string,
+	/* priv */	&mgt_cc_warn,
+	/* def */	VCC_WARN,
+	/* descr */
+	"Warnings used when compiling the C source code with "
+	"the cc_command parameter. By default, VCL is compiled "
+	"with the same set of warnings as Varnish itself.",
+	/* flags */	MUST_RELOAD | BUILD_OPTIONS,
+	/* dyn_min_reason */	NULL,
+	/* dyn_max_reason */	NULL,
+	/* dyn_def_reason */	"-Wall -Werror"
 )
 
 PARAM_STRING(
@@ -1559,7 +1613,11 @@ PARAM_STRING(
 	"VCL files in both the system configuration and shared "
 	"data directories to allow packages to drop their VCL "
 	"files in a standard location where relative includes "
-	"would work."
+	"would work.",
+	/* flags */	BUILD_OPTIONS,
+	/* dyn_min_reason */	NULL,
+	/* dyn_max_reason */	NULL,
+	/* dyn_def_reason */	"${sysconfdir}/varnish:${datadir}/varnish/vcl"
 )
 
 PARAM_STRING(
@@ -1569,15 +1627,22 @@ PARAM_STRING(
 	/* def */	VARNISH_VMOD_DIR,
 	/* descr */
 	"Directory (or colon separated list of directories) "
-	"where VMODs are to be found."
+	"where VMODs are to be found.",
+	/* flags */	BUILD_OPTIONS,
+	/* dyn_min_reason */	NULL,
+	/* dyn_max_reason */	NULL,
+	/* dyn_def_reason */	"${libdir}/varnish/vmods"
 )
 
 /*--------------------------------------------------------------------
  * VCC parameters
  */
 
-#  define PARAM_VCC(nm, def, descr) \
-	PARAM(, , nm, tweak_boolean, &mgt_ ## nm, NULL, NULL, def, "bool", descr)
+#  define PARAM_VCC(nm, def, descr)					\
+	PARAM_PRE							\
+	PARAM(, , nm, tweak_boolean, &mgt_ ## nm, NULL, NULL, def,	\
+	    "bool", descr)						\
+	PARAM_POST
 
 PARAM_VCC(
 	/* name */	vcc_err_unref,
@@ -1606,8 +1671,10 @@ PARAM_VCC(
  */
 
 #  define PARAM_PCRE2(nm, pv, min, def, descr)			\
+	PARAM_PRE						\
 	PARAM(, , nm, tweak_uint, &mgt_param.vre_limits.pv,	\
-	    min, NULL, def, NULL, descr)
+	    min, NULL, def, NULL, descr)			\
+	PARAM_POST
 
 PARAM_PCRE2(
 	/* name */	pcre2_match_limit,
@@ -1640,83 +1707,118 @@ PARAM_PCRE2(
 	" messages."
 )
 
-#  undef PARAM_ALL
+/*--------------------------------------------------------------------
+ * Parameter deprecated aliases
+ *
+ * When a parameter is renamed, but a deprecated alias is kept for
+ * compatibility, its documentation is minimal: only a description in
+ * manual pages, a description and current value in the CLI.
+ *
+ * The deprecated_dummy alias is here for test coverage.
+ */
+
+#define PARAM_ALIAS(al, nm)					\
+	PARAM_PRE						\
+	PARAM(, , al, tweak_alias, NULL, NULL, NULL, #nm, NULL, \
+	    "Deprecated alias for the " #nm " parameter.")	\
+	PARAM_POST
+
+PARAM_ALIAS(deprecated_dummy, debug)
+
+#  undef PARAM_ALIAS
 #  undef PARAM_PCRE2
 #  undef PARAM_STRING
 #  undef PARAM_VCC
 #endif /* defined(PARAM_ALL) */
 
+/*--------------------------------------------------------------------
+ * Bits parameters
+ */
+
+#define PARAM_BITS(nm, fld, def, descr)					\
+	PARAM(nm, fld, nm, tweak_ ## nm, mgt_param.fld, NULL, NULL,	\
+	    def, NULL, descr)
+
+PARAM_PRE
+PARAM_BITS(
+	/* name */	debug,
+	/* fld */	debug_bits,
+	/* def */	"none",
+	/* descr */
+	"Enable/Disable various kinds of debugging.\n"
+	"\tnone\tDisable all debugging\n\n"
+	"Use +/- prefix to set/reset individual bits:")
+#ifdef PARAM_ALL
+#  define DEBUG_BIT(U, l, d) "\n\t" #l "\t" d
+#  include "tbl/debug_bits.h"
+#endif
+PARAM_POST
+
+PARAM_PRE
+PARAM_BITS(
+	/* name */	experimental,
+	/* fld */	experimental_bits,
+	/* def */	"none",
+	/* descr */
+	"Enable/Disable experimental features.\n"
+	"\tnone\tDisable all experimental features\n\n"
+	"Use +/- prefix to set/reset individual bits:")
+#ifdef PARAM_ALL
+#  define EXPERIMENTAL_BIT(U, l, d) "\n\t" #l "\t" d
+#  include "tbl/experimental_bits.h"
+#endif
+PARAM_POST
+
+PARAM_PRE
+PARAM_BITS(
+	/* name */	feature,
+	/* fld */	feature_bits,
+	/* def */	"+validate_headers",
+	/* descr */
+	"Enable/Disable various minor features.\n"
+	"\tdefault\tSet default value\n"
+	"\tnone\tDisable all features.\n\n"
+	"Use +/- prefix to enable/disable individual feature:")
+#ifdef PARAM_ALL
+#  define FEATURE_BIT(U, l, d) "\n\t" #l "\t" d
+#  include "tbl/feature_bits.h"
+#endif
+PARAM_POST
+
+PARAM_PRE
+PARAM_BITS(
+	/* name */	vsl_mask,
+	/* fld */	vsl_mask,
+	/* def */
+	"-Debug,"
+	"-ExpKill,"
+	"-H2RxBody,"
+	"-H2RxHdr,"
+	"-H2TxBody,"
+	"-H2TxHdr,"
+	"-Hash,"
+	"-ObjHeader,"
+	"-ObjProtocol,"
+	"-ObjReason,"
+	"-ObjStatus,"
+	"-VCL_trace,"
+	"-VdpAcct,"
+	"-VfpAcct,"
+	"-WorkThread",
+	/* descr */
+	"Mask individual VSL messages from being logged.\n"
+	"\tdefault\tSet default value\n"
+	"\nUse +/- prefix in front of VSL tag name to unmask/mask "
+	"individual VSL messages.")
+PARAM_POST
+
+#undef PARAM_ALL
+#undef PARAM_BITS
 #undef PARAM_MEMPOOL
+#undef PARAM_POST
+#undef PARAM_PRE
 #undef PARAM_SIMPLE
 #undef PARAM_THREAD
 #undef PARAM
-
-#if 0 /* NOT ACTUALLY DEFINED HERE */
-/* actual location mgt_param_bits.c*/
-/* see tbl/debug_bits.h */
-PARAM(
-	/* name */	debug,
-	/* type */	debug,
-	/* min */	NULL,
-	/* max */	NULL,
-	/* def */	NULL,
-	/* units */	NULL,
-	/* descr */
-	"Enable/Disable various kinds of debugging.\n"
-	"	none	Disable all debugging\n"
-	"\n"
-	"Use +/- prefix to set/reset individual bits:\n"
-	"	req_state	VSL Request state engine\n"
-	"	workspace	VSL Workspace operations\n"
-	"	waiter	VSL Waiter internals\n"
-	"	waitinglist	VSL Waitinglist events\n"
-	"	syncvsl	Make VSL synchronous\n"
-	"	hashedge	Edge cases in Hash\n"
-	"	vclrel	Rapid VCL release\n"
-	"	lurker	VSL Ban lurker\n"
-	"	esi_chop	Chop ESI fetch to bits\n"
-	"	flush_head	Flush after http1 head\n"
-	"	vtc_mode	Varnishtest Mode"
-)
-
-/* actual location mgt_param_bits.c*/
-/* See tbl/feature_bits.h */
-PARAM(
-	/* name */	feature,
-	/* type */	feature,
-	/* min */	NULL,
-	/* max */	NULL,
-	/* def */	NULL,
-	/* units */	NULL,
-	/* descr */
-	"Enable/Disable various minor features.\n"
-	"	none	Disable all features.\n"
-	"\n"
-	"Use +/- prefix to enable/disable individual feature:\n"
-	"	short_panic	Short panic message.\n"
-	"	wait_silo	Wait for persistent silo.\n"
-	"	no_coredump	No coredumps.\n"
-	"	esi_ignore_https	Treat HTTPS as HTTP in ESI:includes\n"
-	"	esi_disable_xml_check	Don't check of body looks like XML\n"
-	"	esi_ignore_other_elements	Ignore non-esi XML-elements\n"
-	"	esi_remove_bom	Remove UTF-8 BOM"
-)
-
-/* actual location mgt_param_bits.c*/
-PARAM(
-	/* name */	vsl_mask,
-	/* type */	vsl_mask,
-	/* min */	NULL,
-	/* max */	NULL,
-	/* def */	"default",
-	/* units */	NULL,
-	/* descr */
-	"Mask individual VSL messages from being logged.\n"
-	"	default	Set default value\n"
-	"\n"
-	"Use +/- prefix in front of VSL tag name to unmask/mask "
-	"individual VSL messages."
-)
-#endif /* NOT ACTUALLY DEFINED HERE */
 
 /*lint -restore */

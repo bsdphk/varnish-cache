@@ -46,6 +46,10 @@
 #  error "include vdef.h before vrt.h"
 #endif
 
+#define VRT_MAJOR_VERSION	15U
+
+#define VRT_MINOR_VERSION	0U
+
 /***********************************************************************
  * Major and minor VRT API versions.
  *
@@ -53,6 +57,30 @@
  * Whenever something is deleted or changed in a way which is not
  * binary/load-time compatible, increment MAJOR version
  *
+ * NEXT (2022-09-15)
+ *	VRT_AddVDP() deprecated
+ *	VRT_AddVFP() deprecated
+ *	VRT_RemoveVDP() deprecated
+ *	VRT_RemoveVFP() deprecated
+ * 15.0 (2022-03-15)
+ *	VRT_r_req_transport() added
+ *	VRT_Assign_Backend() added
+ *	VRT_StaticDirector() added
+ *	enum lbody_e changed
+ *	- previous enum lbody_e values are defined as macros
+ *	The following functions changed to take `const char *, BODY`:
+ *	- VRT_l_beresp_body()
+ *	- VRT_l_resp_body()
+ *	BODY can either be a BLOB or a STRANDS, but only a STRANDS
+ *	can take a non-NULL const char * prefix. The changes to BODY
+ *	assignments doesn't break the ABI or the API.
+ *	TOSTRAND() and TOSTRANDS() macros added
+ *	[cache.h] enum sess_close replaced by struct stream_close
+ *	[cache.h] http_IsHdr() added
+ *	[cache_filter.h] vfp_init_f() changed to take a VRT_CTX
+ *	[cache_filter.h] vdp_init_f() changed to take a VRT_CTX
+ *	[cache_filter.h] VRT_AddFilter() added
+ *	[cache_filter.h] VRT_RemoveFilter() added
  * 14.0 (2021-09-15)
  *	VIN_n_Arg() no directly returns the directory name.
  *	VSB_new() and VSB_delete() removed
@@ -225,10 +253,6 @@
  *	vrt_acl type added
  */
 
-#define VRT_MAJOR_VERSION	14U
-
-#define VRT_MINOR_VERSION	0U
-
 /***********************************************************************/
 
 #include <stddef.h>		// NULL, size_t
@@ -240,6 +264,7 @@ struct http;
 struct lock;
 struct req;
 struct stevedore;
+struct stream_close;
 struct suckaddr;
 struct vcl;
 struct vcldir;
@@ -254,6 +279,8 @@ struct vsc_seg;
 struct vsl_log;
 struct vsmw_cluster;
 struct ws;
+
+typedef const struct stream_close *stream_close_t;
 
 /***********************************************************************
  * VCL_STRANDS:
@@ -284,7 +311,7 @@ extern const struct strands *vrt_null_strands;
 /*
  * Macros for VCL_STRANDS creation
  */
-#define TOSTRAND(s)(&(struct strands){.n=1,.p=(const char *[1]){s}})
+#define TOSTRAND(s)(&(struct strands){.n=1,.p=(const char *[1]){(s)}})
 #define TOSTRANDS(x, ...)(&(struct strands){.n=x,.p=(const char *[x]){__VA_ARGS__}})
 
 /***********************************************************************
@@ -324,7 +351,7 @@ extern const struct vrt_blob *vrt_null_blob;
 typedef const struct vrt_acl *			VCL_ACL;
 typedef const struct director *			VCL_BACKEND;
 typedef const struct vrt_blob *			VCL_BLOB;
-typedef const char *				VCL_BODY;
+typedef const void *				VCL_BODY;
 typedef unsigned				VCL_BOOL;
 typedef int64_t					VCL_BYTES;
 typedef vtim_dur				VCL_DURATION;
@@ -611,9 +638,14 @@ VCL_STRING VRT_GetHdr(VRT_CTX, VCL_HEADER);
  */
 
 enum lbody_e {
-	LBODY_SET,
-	LBODY_ADD,
+	LBODY_SET_STRING,
+	LBODY_ADD_STRING,
+	LBODY_SET_BLOB,
+	LBODY_ADD_BLOB,
 };
+
+#define LBODY_SET LBODY_SET_STRING
+#define LBODY_ADD LBODY_ADD_STRING
 
 VCL_BYTES VRT_CacheReqBody(VRT_CTX, VCL_BYTES maxsize);
 
@@ -644,7 +676,7 @@ typedef VCL_BACKEND vdi_resolve_f(VRT_CTX, VCL_BACKEND);
 typedef int vdi_gethdrs_f(VRT_CTX, VCL_BACKEND);
 typedef VCL_IP vdi_getip_f(VRT_CTX, VCL_BACKEND);
 typedef void vdi_finish_f(VRT_CTX, VCL_BACKEND);
-typedef enum sess_close vdi_http1pipe_f(VRT_CTX, VCL_BACKEND);
+typedef stream_close_t vdi_http1pipe_f(VRT_CTX, VCL_BACKEND);
 typedef void vdi_event_f(VCL_BACKEND, enum vcl_event_e);
 typedef void vdi_destroy_f(VCL_BACKEND);
 typedef void vdi_panic_f(VCL_BACKEND, struct vsb *);
@@ -680,8 +712,10 @@ VCL_VOID VRT_SetChanged(VCL_BACKEND, VCL_TIME);
 VCL_BACKEND VRT_AddDirector(VRT_CTX, const struct vdi_methods *,
     void *, const char *, ...) v_printflike_(4, 5);
 void VRT_DisableDirector(VCL_BACKEND);
+void VRT_StaticDirector(VCL_BACKEND);
 VCL_BACKEND VRT_LookupDirector(VRT_CTX, VCL_STRING);
 void VRT_DelDirector(VCL_BACKEND *);
+void VRT_Assign_Backend(VCL_BACKEND *dst, VCL_BACKEND src);
 
 /***********************************************************************
  * vmod_priv related

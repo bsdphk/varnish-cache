@@ -67,6 +67,7 @@
 
 static struct vsb pan_vsb_storage, *pan_vsb;
 static pthread_mutex_t panicstr_mtx;
+static pthread_t panicy;
 
 static void pan_sess(struct vsb *, const struct sess *);
 static void pan_req(struct vsb *, const struct req *);
@@ -86,17 +87,14 @@ boc_state_2str(enum boc_state_e e)
 
 /*--------------------------------------------------------------------*/
 
-const char *
-sess_close_2str(enum sess_close sc, int want_desc)
+static void
+pan_stream_close(struct vsb *vsb, stream_close_t sc)
 {
-	switch (sc) {
-	case SC_NULL:		return (want_desc ? "(null)" : "NULL");
-#define SESS_CLOSE(nm, s, err, desc)			\
-	case SC_##nm: return(want_desc ? desc : #nm);
-#include "tbl/sess_close.h"
 
-	default:		return (want_desc ? "(invalid)" : "INVALID");
-	}
+	if (sc != NULL && sc->magic == STREAM_CLOSE_MAGIC)
+		VSB_printf(vsb, "%s(%s)", sc->name, sc->desc);
+	else
+		VSB_printf(vsb, "%p", sc);
 }
 
 /*--------------------------------------------------------------------*/
@@ -161,7 +159,9 @@ pan_htc(struct vsb *vsb, const struct http_conn *htc)
 		return;
 	if (htc->rfd != NULL)
 		VSB_printf(vsb, "fd = %d (@%p),\n", *htc->rfd, htc->rfd);
-	VSB_printf(vsb, "doclose = %s,\n", sess_close_2str(htc->doclose, 0));
+	VSB_printf(vsb, "doclose = ");
+	pan_stream_close(vsb, htc->doclose);
+	VSB_printf(vsb, "\n");
 	WS_Panic(vsb, htc->ws);
 	VSB_printf(vsb, "{rxbuf_b, rxbuf_e} = {%p, %p},\n",
 	    htc->rxbuf_b, htc->rxbuf_e);
@@ -601,12 +601,14 @@ pan_backtrace(struct vsb *vsb)
 	}
 	while (unw_step(&cursor) > 0) {
 		fname[0] = '\0';
-		ip = sp = 0;
-		unw_get_reg(&cursor, UNW_REG_IP, &ip);
-		unw_get_reg(&cursor, UNW_REG_SP, &sp);
-		unw_get_proc_name(&cursor, fname, sizeof(fname), &offp);
-		VSB_printf(vsb, "ip=0x%lx, sp=0x%lx <%s+0x%lx>\n", (long) ip,
-		    (long) sp, fname[0] ? fname : "<unknown>", (long)offp);
+		if (!unw_get_reg(&cursor, UNW_REG_IP, &ip))
+			VSB_printf(vsb, "ip=0x%lx", (long) ip);
+		if (!unw_get_reg(&cursor, UNW_REG_SP, &sp))
+			VSB_printf(vsb, " sp=0x%lx", (long) sp);
+		if (!unw_get_proc_name(&cursor, fname, sizeof(fname), &offp))
+			VSB_printf(vsb, " <%s+0x%lx>",
+			    fname[0] ? fname : "<unknown>", (long)offp);
+		VSB_putc(vsb, '\n');
 	}
 
 	VSB_indent(vsb, -2);
@@ -718,11 +720,16 @@ pan_ic(const char *func, const char *file, int line, const char *cond,
 	struct sigaction sa;
 	int err = errno;
 
-	AZ(pthread_mutex_lock(&panicstr_mtx));
-
-	/* If we already panic'ed, do nothing */
-	while (heritage.panic_str[0])
+	/* If we already panicing in another thread, do nothing */
+	while (heritage.panic_str[0] && panicy != pthread_self())
 		sleep(1);
+
+	if (pthread_mutex_lock(&panicstr_mtx)) {
+		/* Reentrant panic */
+		VSB_printf(pan_vsb,"\n\nPANIC REENTRANCY\n\n");
+		abort();
+	}
+	panicy = pthread_self();
 
 	/*
 	 * should we trigger a SIGSEGV while handling a panic, our sigsegv

@@ -37,6 +37,7 @@ struct listen_sock;
 struct transport;
 struct VCLS;
 struct uds_perms;
+struct conn_heritage;
 
 struct listen_sock {
 	unsigned			magic;
@@ -50,6 +51,8 @@ struct listen_sock {
 	struct suckaddr			*addr;
 	const struct transport		*transport;
 	const struct uds_perms		*perms;
+	unsigned			test_heritage;
+	struct conn_heritage		*conn_heritage;
 };
 
 VTAILQ_HEAD(listen_sock_head, listen_sock);
@@ -102,7 +105,6 @@ void MCH_Fd_Inherit(int fd, const char *what);
 
 #define ARGV_ERR(...)						\
 	do {							\
-		ASSERT_MGT();					\
 		fprintf(stderr, "Error: " __VA_ARGS__);		\
 		fprintf(stderr, "(-? gives usage)\n");		\
 		exit(2);					\
@@ -126,3 +128,9 @@ extern vsm_lock_f *vsc_unlock;
 extern vsm_lock_f *vsmw_lock;
 extern vsm_lock_f *vsmw_unlock;
 
+/* common/common_vext.c */
+
+void vext_argument(const char *);
+void vext_copyin(struct vsb *);
+void vext_load(void);
+void vext_cleanup(void);

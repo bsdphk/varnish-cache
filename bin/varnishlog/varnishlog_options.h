@@ -32,22 +32,24 @@
 #include "vapi/vapi_options.h"
 #include "vut_options.h"
 
+#define LOG_NOTICE_w " This option has no effect without the -w option."
+
 #define LOG_OPT_a							\
 	VOPT("a", "[-a]", "Append to file",				\
 	    "When writing output to a file with the -w option, append"	\
-	    " to it rather than overwrite it."				\
+	    " to it rather than overwrite it." LOG_NOTICE_w		\
 	)
 
 #define LOG_OPT_A							\
 	VOPT("A", "[-A]", "Text output",				\
 	    "When writing output to a file with the -w option, output"	\
-	    " data in ascii format."					\
+	    " data in ascii format." LOG_NOTICE_w			\
 	)
 
 #define LOG_OPT_u							\
 	VOPT("u", "[-u]", "Unbuffered output",				\
 	    "When writing output to a file with the -w option, output"	\
-	    " data is not buffered."					\
+	    " data is not buffered." LOG_NOTICE_w			\
 	)
 
 #define LOG_OPT_w							\
@@ -58,7 +60,9 @@
 	    " reopened allowing the old one to be rotated away. The"	\
 	    " file can then be read by varnishlog and other tools with"	\
 	    " the -r option, unless the -A option was specified. This"	\
-	    " option is required when running in daemon mode."		\
+	    " option is required when running in daemon mode. If the"	\
+	    " filename is -, varnishlog writes to the standard output"	\
+	    " and cannot work as a daemon."				\
 	)
 
 LOG_OPT_a

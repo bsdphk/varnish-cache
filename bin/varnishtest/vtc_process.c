@@ -50,6 +50,7 @@
 
 #include "vtc.h"
 
+#include "vre.h"
 #include "vev.h"
 #include "vlu.h"
 #include "vsb.h"
@@ -256,9 +257,10 @@ term_resize(struct process *pp, int lin, int col)
 }
 
 static int
-term_match_textline(const struct process *pp, int *x, int y, const char *pat)
+term_find_textline(const struct process *pp, int *x, int y, const char *pat)
 {
 	const char *t;
+	int l;
 
 	if (*x == 0) {
 		t = strstr(pp->vram[y], pat);
@@ -268,26 +270,28 @@ term_match_textline(const struct process *pp, int *x, int y, const char *pat)
 		}
 	} else if (*x <= pp->ncol) {
 		t = pp->vram[y] + *x - 1;
-		if (!memcmp(t, pat, strlen(pat)))
+		l = strlen(pat);
+		assert((*x - 1) + (l - 1) < pp->ncol);
+		if (!memcmp(t, pat, l))
 			return (1);
 	}
 	return (0);
 }
 
 static int
-term_match_text(const struct process *pp, int *x, int *y, const char *pat)
+term_find_text(const struct process *pp, int *x, int *y, const char *pat)
 {
 	int yy;
 
 	if (*y == 0) {
 		for (yy = 0; yy < pp->nlin; yy++) {
-			if (term_match_textline(pp, x, yy, pat)) {
+			if (term_find_textline(pp, x, yy, pat)) {
 				*y = yy + 1;
 				return (1);
 			}
 		}
 	} else if (*y <= pp->nlin) {
-		if (term_match_textline(pp, x, *y - 1, pat))
+		if (term_find_textline(pp, x, *y - 1, pat))
 			return (1);
 	}
 	return (0);
@@ -309,8 +313,10 @@ term_expect_text(struct process *pp,
 	if (x < 0 || x > pp->ncol)
 		vtc_fatal(pp->vl, "XXX %d ncol %d", x, pp->ncol);
 	l = strlen(pat);
+	if (x + l - 1 > pp->ncol)
+		vtc_fatal(pp->vl, "XXX %d ncol %d", x + l - 1, pp->ncol);
 	AZ(pthread_mutex_lock(&pp->mtx));
-	while (!term_match_text(pp, &x, &y, pat)) {
+	while (!term_find_text(pp, &x, &y, pat)) {
 		if (x != 0 && y != 0) {
 			t = pp->vram[y - 1] + x - 1;
 			vtc_log(pp->vl, 4,
@@ -347,6 +353,65 @@ term_expect_cursor(const struct process *pp, const char *lin, const char *col)
 	if (x != 0 && (x-1) != pos->tp_col)
 		vtc_fatal(pp->vl, "Cursor in column %d (expected %d)",
 		    pos->tp_col + 1, y);
+}
+
+static void
+term_match_text(struct process *pp,
+    const char *lin, const char *col, const char *re)
+{
+	int i, l, err, erroff;
+	struct vsb *vsb, re_vsb[1];
+	size_t len;
+	ssize_t x, y;
+	vre_t *vre;
+	char errbuf[VRE_ERROR_LEN];
+
+	vsb = VSB_new_auto();
+	AN(vsb);
+
+	y = strtoul(lin, NULL, 0);
+	if (y < 0 || y > pp->nlin)
+		vtc_fatal(pp->vl, "YYY %zd nlin %d", y, pp->nlin);
+	x = strtoul(col, NULL, 0);
+	for(l = 0; l < 10 && x > pp->ncol; l++)	// wait for screen change
+		usleep(100000);
+	if (x < 0 || x > pp->ncol)
+		vtc_fatal(pp->vl, "XXX %zd ncol %d", x, pp->ncol);
+
+	if (x)
+		x--;
+
+	if (y)
+		y--;
+
+	vre = VRE_compile(re, 0, &err, &erroff, 1);
+	if (vre == NULL) {
+		AN(VSB_init(re_vsb, errbuf, sizeof errbuf));
+		AZ(VRE_error(re_vsb, err));
+		AZ(VSB_finish(re_vsb));
+		VSB_fini(re_vsb);
+		vtc_fatal(pp->vl, "invalid regexp \"%s\" at %d (%s)",
+		    re, erroff, errbuf);
+	}
+
+	AZ(pthread_mutex_lock(&pp->mtx));
+
+	len = (pp->nlin - y) * (pp->ncol - x);
+	for (i = y; i < pp->nlin; i++) {
+		VSB_bcat(vsb, &pp->vram[i][x], pp->ncol - x);
+		VSB_putc(vsb, '\n');
+	}
+
+	AZ(VSB_finish(vsb));
+
+	if (VRE_match(vre, VSB_data(vsb), len, 0, NULL) < 1)
+		vtc_fatal(pp->vl, "match failed: (\"%s\")", re);
+	else
+		vtc_log(pp->vl, 4, "match succeeded");
+
+	AZ(pthread_mutex_unlock(&pp->mtx));
+	VSB_destroy(&vsb);
+	VRE_free(&vre);
 }
 
 /**********************************************************************
@@ -905,6 +970,9 @@ process_close(struct process *p)
  * \-stop
  *	Shorthand for -kill TERM.
  *
+ * \-winsz LIN COL
+ *	Change the terminal window size to LIN lines and COL columns.
+ *
  * \-write STRING
  *	Write a string to the process' stdin.
  *
@@ -920,6 +988,12 @@ process_close(struct process *p)
  *
  * \-expect-text LIN COL PAT
  *	Wait for PAT to appear at LIN,COL on the virtual screen.
+ *	Lines and columns are numbered 1...N
+ *	LIN==0 means "on any line"
+ *	COL==0 means "anywhere on the line"
+ *
+ * \-match-text LIN COL PAT
+ *	Wait for the PAT regular expression to match the text at LIN,COL on the virtual screen.
  *	Lines and columns are numbered 1...N
  *	LIN==0 means "on any line"
  *	COL==0 means "anywhere on the line"
@@ -1057,6 +1131,14 @@ cmd_process(CMD_ARGS)
 			AN(av[2]);
 			term_expect_cursor(p, av[1], av[2]);
 			av += 2;
+			continue;
+		}
+		if (!strcmp(*av, "-match-text")) {
+			AN(av[1]);
+			AN(av[2]);
+			AN(av[3]);
+			term_match_text(p, av[1], av[2], av[3]);
+			av += 3;
 			continue;
 		}
 		if (!strcmp(*av, "-screen_dump") ||

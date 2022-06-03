@@ -677,7 +677,7 @@ h2_rx_headers(struct worker *wrk, struct h2_sess *h2, struct h2_req *r2)
 
 	h2->new_req = req;
 	req->sp = h2->sess;
-	req->transport = &H2_transport;
+	req->transport = &HTTP2_transport;
 
 	req->t_first = VTIM_real();
 	req->t_req = VTIM_real();
@@ -1161,9 +1161,9 @@ h2_req_body(struct req *req)
 /**********************************************************************/
 
 void v_matchproto_(vtr_req_fail_f)
-h2_req_fail(struct req *req, enum sess_close reason)
+h2_req_fail(struct req *req, stream_close_t reason)
 {
-	assert(reason > 0);
+	assert(reason != SC_NULL);
 	assert(req->sp->fd != 0);
 	VSLb(req->vsl, SLT_Debug, "H2FAILREQ");
 }
@@ -1393,8 +1393,8 @@ h2_rxframe(struct worker *wrk, struct h2_sess *h2)
 	if (h2->do_sweep)
 		(void)h2_sweep(wrk, h2);
 
-	h2->rxf_len =  vbe32dec(h2->htc->rxbuf_b) >> 8;
-	h2->rxf_type =  h2->htc->rxbuf_b[3];
+	h2->rxf_len = vbe32dec(h2->htc->rxbuf_b) >> 8;
+	h2->rxf_type = h2->htc->rxbuf_b[3];
 	h2->rxf_flags = h2->htc->rxbuf_b[4];
 	h2->rxf_stream = vbe32dec(h2->htc->rxbuf_b + 5);
 	h2->rxf_stream &= ~(1LU<<31);			// rfc7540,l,690,692

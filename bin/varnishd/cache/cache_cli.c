@@ -77,7 +77,6 @@ cli_cb_before(const struct cli *cli)
 	ASSERT_CLI();
 	VSL(SLT_CLI, 0, "Rd %s", VSB_data(cli->cmd));
 	VCL_Poll();
-	VBE_Poll();
 	Lck_Lock(&cli_mtx);
 }
 
@@ -98,6 +97,9 @@ CLI_Run(void)
 	struct cli *cli;
 
 	add_check = 1;
+
+	/* Tell waiting MGT that we are ready to speak CLI */
+	AZ(VCLI_WriteResult(heritage.cli_out, CLIS_OK, "Ready"));
 
 	cli = VCLS_AddFd(cache_cls,
 	    heritage.cli_in, heritage.cli_out, NULL, NULL);

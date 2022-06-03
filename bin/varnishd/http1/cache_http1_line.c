@@ -55,7 +55,7 @@ struct v1l {
 	unsigned		magic;
 #define V1L_MAGIC		0x2f2142e5
 	int			*wfd;
-	enum sess_close		werr;	/* valid after V1L_Flush() */
+	stream_close_t		werr;	/* valid after V1L_Flush() */
 	struct iovec		*iov;
 	unsigned		siov;
 	unsigned		niov;
@@ -118,25 +118,24 @@ V1L_Open(struct worker *wrk, struct ws *ws, int *fd, struct vsl_log *vsl,
 	v1l->wfd = fd;
 	v1l->deadline = deadline;
 	v1l->vsl = vsl;
+	v1l->werr = SC_NULL;
 	wrk->v1l = v1l;
 
 	WS_Release(ws, u * sizeof(struct iovec));
 }
 
-enum sess_close
+stream_close_t
 V1L_Close(struct worker *wrk, uint64_t *cnt)
 {
 	struct v1l *v1l;
 	struct ws *ws;
 	uintptr_t ws_snap;
-	enum sess_close sc;
+	stream_close_t sc;
 
 	CHECK_OBJ_NOTNULL(wrk, WORKER_MAGIC);
 	AN(cnt);
 	sc = V1L_Flush(wrk);
-	v1l = wrk->v1l;
-	wrk->v1l = NULL;
-	CHECK_OBJ_NOTNULL(v1l, V1L_MAGIC);
+	TAKE_OBJ_NOTNULL(v1l, &wrk->v1l, V1L_MAGIC);
 	*cnt = v1l->cnt;
 	ws = v1l->ws;
 	ws_snap = v1l->ws_snap;
@@ -169,7 +168,7 @@ v1l_prune(struct v1l *v1l, size_t bytes)
 	AZ(v1l->liov);
 }
 
-enum sess_close
+stream_close_t
 V1L_Flush(const struct worker *wrk)
 {
 	ssize_t i;
@@ -179,6 +178,7 @@ V1L_Flush(const struct worker *wrk)
 	CHECK_OBJ_NOTNULL(wrk, WORKER_MAGIC);
 	v1l = wrk->v1l;
 	CHECK_OBJ_NOTNULL(v1l, V1L_MAGIC);
+	CHECK_OBJ_NOTNULL(v1l->werr, STREAM_CLOSE_MAGIC);
 	AN(v1l->wfd);
 
 	assert(v1l->niov <= v1l->siov);
@@ -241,7 +241,7 @@ V1L_Flush(const struct worker *wrk)
 			VSLb(v1l->vsl, SLT_Debug,
 			    "Write error, retval = %zd, len = %zd, errno = %s",
 			    i, v1l->liov, VAS_errtxt(errno));
-			AZ(v1l->werr);
+			assert(v1l->werr == SC_NULL);
 			if (errno == EPIPE)
 				v1l->werr = SC_REM_CLOSE;
 			else
@@ -253,6 +253,7 @@ V1L_Flush(const struct worker *wrk)
 	v1l->niov = 0;
 	if (v1l->ciov < v1l->siov)
 		v1l->ciov = v1l->niov++;
+	CHECK_OBJ_NOTNULL(v1l->werr, STREAM_CLOSE_MAGIC);
 	return (v1l->werr);
 }
 

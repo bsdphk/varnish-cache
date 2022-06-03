@@ -33,6 +33,7 @@
 
 #include "config.h"
 
+#include <limits.h>
 #include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -63,6 +64,8 @@ struct vcc_priv {
 };
 
 char *mgt_cc_cmd;
+char *mgt_cc_cmd_def;
+char *mgt_cc_warn;
 const char *mgt_vcl_path;
 const char *mgt_vmod_path;
 #define MGT_VCC(t, n, cc) t mgt_vcc_ ## n;
@@ -123,25 +126,20 @@ run_vcc(void *priv)
 }
 
 /*--------------------------------------------------------------------
- * Invoke system C compiler in a sub-process
+ * Expand the cc_command argument
  */
 
-static void v_matchproto_(vsub_func_f)
-run_cc(void *priv)
+static const char *
+cc_expand(struct vsb *sb, const char *cc_cmd, char exp)
 {
-	struct vcc_priv *vp;
-	struct vsb *sb;
+	char buf[PATH_MAX];
+	const char *p;
 	int pct;
-	char *p;
 
-	VJ_subproc(JAIL_SUBPROC_CC);
-	CAST_OBJ_NOTNULL(vp, priv, VCC_PRIV_MAGIC);
-
-	AZ(chdir(VSB_data(vp->dir)));
-
-	sb = VSB_new_auto();
 	AN(sb);
-	for (p = mgt_cc_cmd, pct = 0; *p; ++p) {
+	AN(cc_cmd);
+
+	for (p = cc_cmd, pct = 0; *p; ++p) {
 		if (pct) {
 			switch (*p) {
 			case 's':
@@ -149,6 +147,21 @@ run_cc(void *priv)
 				break;
 			case 'o':
 				VSB_cat(sb, VGC_LIB);
+				break;
+			case 'w':
+				VSB_cat(sb, mgt_cc_warn);
+				break;
+			case 'd':
+				VSB_cat(sb, mgt_cc_cmd_def);
+				break;
+			case 'D':
+				if (exp == pct)
+					return ("recursive expansion");
+				AZ(cc_expand(sb, mgt_cc_cmd_def, pct));
+				break;
+			case 'n':
+				AN(getcwd(buf, sizeof buf));
+				VSB_cat(sb, buf);
 				break;
 			case '%':
 				VSB_putc(sb, '%');
@@ -167,7 +180,34 @@ run_cc(void *priv)
 	}
 	if (pct)
 		VSB_putc(sb, '%');
+	return (NULL);
+}
+
+/*--------------------------------------------------------------------
+ * Invoke system C compiler in a sub-process
+ */
+
+static void v_matchproto_(vsub_func_f)
+run_cc(void *priv)
+{
+	struct vcc_priv *vp;
+	struct vsb *sb;
+	const char *err;
+
+	VJ_subproc(JAIL_SUBPROC_CC);
+	CAST_OBJ_NOTNULL(vp, priv, VCC_PRIV_MAGIC);
+
+	sb = VSB_new_auto();
+	AN(sb);
+	err = cc_expand(sb, mgt_cc_cmd, '\0');
+	if (err != NULL) {
+		VSB_destroy(&sb);
+		fprintf(stderr, "cc_command: %s\n", err);
+		exit(1);
+	}
 	AZ(VSB_finish(sb));
+
+	AZ(chdir(VSB_data(vp->dir)));
 
 	(void)umask(027);
 	(void)execl("/bin/sh", "/bin/sh", "-c", VSB_data(sb), (char*)0);

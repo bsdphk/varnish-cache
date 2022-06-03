@@ -101,6 +101,7 @@ VCL_Req2Ctx(struct vrt_ctx *ctx, struct req *req)
 
 	CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);
 	CHECK_OBJ_NOTNULL(req, REQ_MAGIC);
+	CHECK_OBJ_NOTNULL(req->doclose, STREAM_CLOSE_MAGIC);
 
 	ctx->vcl = req->vcl;
 	ctx->syntax = ctx->vcl->conf->syntax;
@@ -213,6 +214,7 @@ vcl_send_event(struct vcl *vcl, enum vcl_event_e ev, struct vsb **msg)
 	struct vrt_ctx *ctx;
 
 	ASSERT_CLI();
+	ASSERT_VCL_ACTIVE();
 
 	CHECK_OBJ_NOTNULL(vcl, VCL_MAGIC);
 	CHECK_OBJ_NOTNULL(vcl->conf, VCL_CONF_MAGIC);
@@ -337,6 +339,7 @@ VCL_Update(struct vcl **vcc, struct vcl *vcl)
 	*vcc = NULL;
 
 	CHECK_OBJ_ORNULL(old, VCL_MAGIC);
+	ASSERT_VCL_ACTIVE();
 
 	Lck_Lock(&vcl_mtx);
 	if (old != NULL) {
@@ -393,6 +396,7 @@ VCL_IterDirector(struct cli *cli, const char *pat,
 	struct vcl *vcl;
 
 	ASSERT_CLI();
+	ASSERT_VCL_ACTIVE();
 	vsb = VSB_new_auto();
 	AN(vsb);
 	if (pat == NULL || *pat == '\0' || !strcmp(pat, "*")) {
@@ -444,24 +448,19 @@ vcl_BackendEvent(const struct vcl *vcl, enum vcl_event_e e)
 }
 
 static void
-vcl_KillBackends(struct vcl *vcl)
+vcl_KillBackends(const struct vcl *vcl)
 {
-	struct vcldir *vdir;
+	struct vcldir *vdir, *vdir2;
 
 	CHECK_OBJ_NOTNULL(vcl, VCL_MAGIC);
-	AZ(vcl->busy);
-	assert(VTAILQ_EMPTY(&vcl->ref_list));
-	Lck_Lock(&vcl_mtx);
-	while (1) {
-		vdir = VTAILQ_FIRST(&vcl->director_list);
-		if (vdir == NULL)
-			break;
-		VTAILQ_REMOVE(&vcl->director_list, vdir, list);
-		AN(vdir->methods->destroy);
-		vdir->methods->destroy(vdir->dir);
-		vcldir_free(vdir);
-	}
-	Lck_Unlock(&vcl_mtx);
+	assert(vcl->temp == VCL_TEMP_COLD || vcl->temp == VCL_TEMP_INIT);
+	/*
+	 * Unlocked because no further directors can be added, and the
+	 * remaining ones need to be able to remove themselves.
+	 */
+	VTAILQ_FOREACH_SAFE(vdir, &vcl->director_list, list, vdir2)
+		VDI_Event(vdir->dir, VCL_EVENT_DISCARD);
+	assert(VTAILQ_EMPTY(&vcl->director_list));
 }
 
 /*--------------------------------------------------------------------*/
@@ -518,8 +517,7 @@ VCL_Close(struct vcl **vclp)
 	struct vcl *vcl;
 
 	TAKE_OBJ_NOTNULL(vcl, vclp, VCL_MAGIC);
-	assert(VTAILQ_EMPTY(&vcl->vfps));
-	assert(VTAILQ_EMPTY(&vcl->vdps));
+	assert(VTAILQ_EMPTY(&vcl->filters));
 	AZ(dlclose(vcl->dlh));
 	FREE_OBJ(vcl);
 }
@@ -665,6 +663,7 @@ vcl_load(struct cli *cli,
 	struct vsb *msg;
 
 	ASSERT_CLI();
+	ASSERT_VCL_ACTIVE();
 
 	vcl = vcl_find(name);
 	AZ(vcl);
@@ -686,8 +685,7 @@ vcl_load(struct cli *cli,
 	XXXAN(vcl->loaded_name);
 	VTAILQ_INIT(&vcl->director_list);
 	VTAILQ_INIT(&vcl->ref_list);
-	VTAILQ_INIT(&vcl->vfps);
-	VTAILQ_INIT(&vcl->vdps);
+	VTAILQ_INIT(&vcl->filters);
 
 	vcl->temp = VCL_TEMP_INIT;
 
@@ -707,10 +705,6 @@ vcl_load(struct cli *cli,
 
 	VCLI_Out(cli, "Loaded \"%s\" as \"%s\"", fn , name);
 	VTAILQ_INSERT_TAIL(&vcl_head, vcl, list);
-	Lck_Lock(&vcl_mtx);
-	if (vcl_active == NULL)
-		vcl_active = vcl;
-	Lck_Unlock(&vcl_mtx);
 	VSC_C_main->n_vcl++;
 	VSC_C_main->n_vcl_avail++;
 }
@@ -724,6 +718,7 @@ VCL_Poll(void)
 	struct vcl *vcl, *vcl2;
 
 	ASSERT_CLI();
+	ASSERT_VCL_ACTIVE();
 	VTAILQ_FOREACH_SAFE(vcl, &vcl_head, list, vcl2) {
 		if (vcl->temp == VCL_TEMP_BUSY ||
 		    vcl->temp == VCL_TEMP_COOLING)
@@ -759,6 +754,7 @@ vcl_cli_list(struct cli *cli, const char * const *av, void *priv)
 	(void)av;
 	(void)priv;
 	ASSERT_CLI();
+	ASSERT_VCL_ACTIVE();
 	vsb = VSB_new_auto();
 	AN(vsb);
 	VTAILQ_FOREACH(vcl, &vcl_head, list) {
@@ -791,6 +787,7 @@ vcl_cli_list_json(struct cli *cli, const char * const *av, void *priv)
 
 	(void)priv;
 	ASSERT_CLI();
+	ASSERT_VCL_ACTIVE();
 	VCLI_JSON_begin(cli, 2, av);
 	VCLI_Out(cli, ",\n");
 	VTAILQ_FOREACH(vcl, &vcl_head, list) {
@@ -848,6 +845,7 @@ vcl_cli_state(struct cli *cli, const char * const *av, void *priv)
 
 	AZ(priv);
 	ASSERT_CLI();
+	ASSERT_VCL_ACTIVE();
 	AN(av[2]);
 	AN(av[3]);
 
@@ -873,6 +871,7 @@ vcl_cli_discard(struct cli *cli, const char * const *av, void *priv)
 	struct vcl *vcl;
 
 	ASSERT_CLI();
+	ASSERT_VCL_ACTIVE();
 	(void)cli;
 	AZ(priv);
 	vcl = vcl_find(av[2]);
@@ -906,6 +905,7 @@ vcl_cli_label(struct cli *cli, const char * const *av, void *priv)
 	struct vcl *vcl;
 
 	ASSERT_CLI();
+	ASSERT_VCL_ACTIVE();
 	(void)cli;
 	(void)priv;
 	vcl = vcl_find(av[3]);
@@ -931,6 +931,7 @@ vcl_cli_use(struct cli *cli, const char * const *av, void *priv)
 	struct vcl *vcl;
 
 	ASSERT_CLI();
+	ASSERT_VCL_ACTIVE();
 	AN(cli);
 	AZ(priv);
 	vcl = vcl_find(av[2]);
@@ -946,27 +947,33 @@ vcl_cli_show(struct cli *cli, const char * const *av, void *priv)
 {
 	struct vcl *vcl;
 	int verbose = 0;
-	int i;
+	int i = 2;
 
 	ASSERT_CLI();
+	ASSERT_VCL_ACTIVE();
 	AZ(priv);
-	if (!strcmp(av[2], "-v") && av[3] == NULL) {
-		VCLI_Out(cli, "Too few parameters");
-		VCLI_SetResult(cli, CLIS_TOOFEW);
-		return;
-	} else if (strcmp(av[2], "-v") && av[3] != NULL) {
-		VCLI_Out(cli, "Unknown options '%s'", av[2]);
+
+	if (av[i] != NULL && !strcmp(av[i], "-v")) {
+		verbose = 1;
+		i++;
+	}
+
+	if (av[i] == NULL) {
+		vcl = vcl_active;
+		AN(vcl);
+	} else {
+		vcl = vcl_find(av[i]);
+		i++;
+	}
+
+	if (av[i] != NULL) {
+		VCLI_Out(cli, "Too many parameters: '%s'", av[i]);
 		VCLI_SetResult(cli, CLIS_PARAM);
 		return;
-	} else if (av[3] != NULL) {
-		verbose = 1;
-		vcl = vcl_find(av[3]);
-	} else
-		vcl = vcl_find(av[2]);
+	}
 
 	if (vcl == NULL) {
-		VCLI_Out(cli, "No VCL named '%s'",
-		    av[3] == NULL ? av[2] : av[3]);
+		VCLI_Out(cli, "No VCL named '%s'", av[i - 1]);
 		VCLI_SetResult(cli, CLIS_PARAM);
 		return;
 	}

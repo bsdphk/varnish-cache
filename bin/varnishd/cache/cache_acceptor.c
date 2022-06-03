@@ -80,41 +80,56 @@ struct poolsock {
  * TCP options we want to control
  */
 
-static struct tcp_opt {
+union sock_arg {
+	struct linger	lg;
+	struct timeval	tv;
+	int		i;
+};
+
+static struct sock_opt {
 	int		level;
 	int		optname;
 	const char	*strname;
+	unsigned	mod;
 	socklen_t	sz;
-	void		*ptr;
-	int		need;
-	int		iponly;
-} tcp_opts[] = {
-#define TCPO(lvl, nam, sz, ip) { lvl, nam, #nam, sizeof(sz), 0, 0, ip},
+	union sock_arg	arg[1];
+} sock_opts[] = {
+	/* Note: Setting the mod counter to something not-zero is needed
+	 * to force the setsockopt() calls on startup */
+#define SOCK_OPT(lvl, nam, typ) { lvl, nam, #nam, 1, sizeof(typ) },
 
-	TCPO(SOL_SOCKET, SO_LINGER, struct linger, 0)
-	TCPO(SOL_SOCKET, SO_KEEPALIVE, int, 0)
-	TCPO(IPPROTO_TCP, TCP_NODELAY, int, 1)
-	TCPO(SOL_SOCKET, SO_SNDTIMEO, struct timeval, 0)
-	TCPO(SOL_SOCKET, SO_RCVTIMEO, struct timeval, 0)
+	SOCK_OPT(SOL_SOCKET, SO_LINGER, struct linger)
+	SOCK_OPT(SOL_SOCKET, SO_KEEPALIVE, int)
+	SOCK_OPT(SOL_SOCKET, SO_SNDTIMEO, struct timeval)
+	SOCK_OPT(SOL_SOCKET, SO_RCVTIMEO, struct timeval)
 
-#ifdef HAVE_TCP_KEEP
-	TCPO(IPPROTO_TCP, TCP_KEEPIDLE, int, 1)
-	TCPO(IPPROTO_TCP, TCP_KEEPCNT, int, 1)
-	TCPO(IPPROTO_TCP, TCP_KEEPINTVL, int, 1)
+	SOCK_OPT(IPPROTO_TCP, TCP_NODELAY, int)
+
+#if defined(HAVE_TCP_KEEP)
+	SOCK_OPT(IPPROTO_TCP, TCP_KEEPIDLE, int)
+	SOCK_OPT(IPPROTO_TCP, TCP_KEEPCNT, int)
+	SOCK_OPT(IPPROTO_TCP, TCP_KEEPINTVL, int)
+#elif defined(HAVE_TCP_KEEPALIVE)
+	SOCK_OPT(IPPROTO_TCP, TCP_KEEPALIVE, int)
 #endif
 
-#undef TCPO
+#undef SOCK_OPT
 };
 
-static const int n_tcp_opts = sizeof tcp_opts / sizeof tcp_opts[0];
+static const int n_sock_opts = sizeof sock_opts / sizeof sock_opts[0];
+
+struct conn_heritage {
+	unsigned	sess_set;
+	unsigned	listen_mod;
+};
 
 /*--------------------------------------------------------------------
  * We want to get out of any kind of trouble-hit TCP connections as fast
- * as absolutely possible, so we set them LINGER enabled with zero timeout,
- * so that even if there are outstanding write data on the socket, a close(2)
- * will return immediately.
+ * as absolutely possible, so we set them LINGER disabled, so that even if
+ * there are outstanding write data on the socket, a close(2) will return
+ * immediately.
  */
-static const struct linger linger = {
+static const struct linger disable_so_linger = {
 	.l_onoff	=	0,
 };
 
@@ -123,7 +138,12 @@ static const struct linger linger = {
  * hung up on connections returning from waitinglists
  */
 
-static unsigned		need_test;
+static const unsigned enable_so_keepalive = 1;
+
+/* We disable Nagle's algorithm in favor of low latency setups.
+ */
+
+static const unsigned enable_tcp_nodelay = 1;
 
 /*--------------------------------------------------------------------
  * lacking a better place, we put some generic periodic updates
@@ -147,107 +167,150 @@ vca_periodic(vtim_real t0)
  */
 
 static int
-vca_tcp_opt_init(void)
+vca_sock_opt_init(void)
 {
-	int n;
-	int one = 1;
-	struct tcp_opt *to;
-	struct timeval tv;
-	int chg = 0;
-	int x;
+	struct sock_opt *so;
+	union sock_arg tmp;
+	int n, chg = 0;
+	size_t sz;
 
-	memset(&tv, 0, sizeof tv);
-	memset(&x, 0, sizeof x);
+	memset(&tmp, 0, sizeof tmp);
 
-	for (n = 0; n < n_tcp_opts; n++) {
-		to = &tcp_opts[n];
-		if (to->ptr == NULL)
-			to->ptr = calloc(1, to->sz);
-		AN(to->ptr);
-		if (!strcmp(to->strname, "SO_LINGER")) {
-			assert(to->sz == sizeof linger);
-			memcpy(to->ptr, &linger, sizeof linger);
-			to->need = 1;
-		} else if (!strcmp(to->strname, "TCP_NODELAY")) {
-			assert(to->sz == sizeof one);
-			memcpy(to->ptr, &one, sizeof one);
-			to->need = 1;
-		} else if (!strcmp(to->strname, "SO_KEEPALIVE")) {
-			assert(to->sz == sizeof one);
-			memcpy(to->ptr, &one, sizeof one);
-			to->need = 1;
-#define NEW_VAL(to, xx)						\
-	do {							\
-		assert(to->sz == sizeof xx);			\
-		if (memcmp(to->ptr, &(xx), sizeof xx)) {	\
-			memcpy(to->ptr, &(xx), sizeof xx);	\
-			to->need = 1;				\
-			chg = 1;				\
-			need_test = 1;				\
-		}						\
+	for (n = 0; n < n_sock_opts; n++) {
+		so = &sock_opts[n];
+
+#define SET_VAL(nm, so, fld, val)					\
+	do {								\
+		if (!strcmp(#nm, so->strname)) {			\
+			assert(so->sz == sizeof so->arg->fld);		\
+			so->arg->fld = (val);				\
+		}							\
 	} while (0)
 
-		} else if (!strcmp(to->strname, "SO_SNDTIMEO")) {
-			tv = VTIM_timeval(cache_param->idle_send_timeout);
-			NEW_VAL(to, tv);
-		} else if (!strcmp(to->strname, "SO_RCVTIMEO")) {
-			tv = VTIM_timeval(cache_param->timeout_idle);
-			NEW_VAL(to, tv);
-#ifdef HAVE_TCP_KEEP
-		} else if (!strcmp(to->strname, "TCP_KEEPIDLE")) {
-			x = (int)(cache_param->tcp_keepalive_time);
-			NEW_VAL(to, x);
-		} else if (!strcmp(to->strname, "TCP_KEEPCNT")) {
-			x = (int)(cache_param->tcp_keepalive_probes);
-			NEW_VAL(to, x);
-		} else if (!strcmp(to->strname, "TCP_KEEPINTVL")) {
-			x = (int)(cache_param->tcp_keepalive_intvl);
-			NEW_VAL(to, x);
+#define NEW_VAL(nm, so, fld, val)					\
+	do {								\
+		if (!strcmp(#nm, so->strname)) {			\
+			sz = sizeof tmp.fld;				\
+			assert(so->sz == sz);				\
+			tmp.fld = (val);				\
+			if (memcmp(&so->arg->fld, &(tmp.fld), sz)) {	\
+				memcpy(&so->arg->fld, &(tmp.fld), sz);	\
+				so->mod++;				\
+				chg = 1;				\
+			}						\
+		}							\
+	} while (0)
+
+		SET_VAL(SO_LINGER, so, lg, disable_so_linger);
+		SET_VAL(SO_KEEPALIVE, so, i, enable_so_keepalive);
+		NEW_VAL(SO_SNDTIMEO, so, tv,
+		    VTIM_timeval(cache_param->idle_send_timeout));
+		NEW_VAL(SO_RCVTIMEO, so, tv,
+		    VTIM_timeval(cache_param->timeout_idle));
+		SET_VAL(TCP_NODELAY, so, i, enable_tcp_nodelay);
+#if defined(HAVE_TCP_KEEP)
+		NEW_VAL(TCP_KEEPIDLE, so, i,
+		    (int)cache_param->tcp_keepalive_time);
+		NEW_VAL(TCP_KEEPCNT, so, i,
+		    (int)cache_param->tcp_keepalive_probes);
+		NEW_VAL(TCP_KEEPINTVL, so, i,
+		    (int)cache_param->tcp_keepalive_intvl);
+#elif defined(HAVE_TCP_KEEPALIVE)
+		NEW_VAL(TCP_KEEPALIVE, so, i,
+		    (int)cache_param->tcp_keepalive_time);
 #endif
-		}
 	}
 	return (chg);
 }
 
 static void
-vca_tcp_opt_test(const int sock, const unsigned uds)
+vca_sock_opt_test(const struct listen_sock *ls, const struct sess *sp)
 {
-	int i, n;
-	struct tcp_opt *to;
+	struct conn_heritage *ch;
+	struct sock_opt *so;
+	union sock_arg tmp;
 	socklen_t l;
-	void *ptr;
+	int i, n;
 
-	for (n = 0; n < n_tcp_opts; n++) {
-		to = &tcp_opts[n];
-		if (to->iponly && uds)
+	CHECK_OBJ_NOTNULL(ls, LISTEN_SOCK_MAGIC);
+	CHECK_OBJ_NOTNULL(sp, SESS_MAGIC);
+
+	for (n = 0; n < n_sock_opts; n++) {
+		so = &sock_opts[n];
+		ch = &ls->conn_heritage[n];
+		if (ch->sess_set) {
+			VSL(SLT_Debug, sp->vxid,
+			    "sockopt: Not testing nonhereditary %s for %s=%s",
+			    so->strname, ls->name, ls->endpoint);
 			continue;
-		to->need = 1;
-		ptr = calloc(1, to->sz);
-		AN(ptr);
-		l = to->sz;
-		i = getsockopt(sock, to->level, to->optname, ptr, &l);
-		if (i == 0 && !memcmp(ptr, to->ptr, to->sz))
-			to->need = 0;
-		free(ptr);
+		}
+		if (so->level == IPPROTO_TCP && ls->uds) {
+			VSL(SLT_Debug, sp->vxid,
+			    "sockopt: Not testing incompatible %s for %s=%s",
+			    so->strname, ls->name, ls->endpoint);
+			continue;
+		}
+		memset(&tmp, 0, sizeof tmp);
+		l = so->sz;
+		i = getsockopt(sp->fd, so->level, so->optname, &tmp, &l);
+		if (i == 0 && memcmp(&tmp, so->arg, so->sz)) {
+			VSL(SLT_Debug, sp->vxid,
+			    "sockopt: Test confirmed %s non heredity for %s=%s",
+			    so->strname, ls->name, ls->endpoint);
+			ch->sess_set = 1;
+		}
 		if (i && errno != ENOPROTOOPT)
 			VTCP_Assert(i);
 	}
 }
 
 static void
-vca_tcp_opt_set(const int sock, const unsigned uds, const int force)
+vca_sock_opt_set(const struct listen_sock *ls, const struct sess *sp)
 {
-	int n;
-	struct tcp_opt *to;
+	struct conn_heritage *ch;
+	struct sock_opt *so;
+	unsigned vxid;
+	int n, sock;
 
-	for (n = 0; n < n_tcp_opts; n++) {
-		to = &tcp_opts[n];
-		if (to->iponly && uds)
+	CHECK_OBJ_NOTNULL(ls, LISTEN_SOCK_MAGIC);
+
+	if (sp != NULL) {
+		CHECK_OBJ(sp, SESS_MAGIC);
+		sock = sp->fd;
+		vxid = sp->vxid;
+	} else {
+		sock = ls->sock;
+		vxid = 0;
+	}
+
+	for (n = 0; n < n_sock_opts; n++) {
+		so = &sock_opts[n];
+		ch = &ls->conn_heritage[n];
+		if (so->level == IPPROTO_TCP && ls->uds) {
+			VSL(SLT_Debug, vxid,
+			    "sockopt: Not setting incompatible %s for %s=%s",
+			    so->strname, ls->name, ls->endpoint);
 			continue;
-		if (to->need || force) {
-			VTCP_Assert(setsockopt(sock,
-			    to->level, to->optname, to->ptr, to->sz));
 		}
+		if (sp == NULL && ch->listen_mod == so->mod) {
+			VSL(SLT_Debug, vxid,
+			    "sockopt: Not setting unmodified %s for %s=%s",
+			    so->strname, ls->name, ls->endpoint);
+			continue;
+		}
+		if  (sp != NULL && !ch->sess_set) {
+			VSL(SLT_Debug, sp->vxid,
+			    "sockopt: %s may be inherited for %s=%s",
+			    so->strname, ls->name, ls->endpoint);
+			continue;
+		}
+		VSL(SLT_Debug, vxid,
+		    "sockopt: Setting %s for %s=%s",
+		    so->strname, ls->name, ls->endpoint);
+		VTCP_Assert(setsockopt(sock,
+		    so->level, so->optname, so->arg, so->sz));
+		if (sp == NULL)
+			ch->listen_mod = so->mod;
 	}
 }
 
@@ -393,11 +456,11 @@ vca_make_session(struct worker *wrk, void *arg)
 	vca_pace_good();
 	wrk->stats->sess_conn++;
 
-	if (need_test) {
-		vca_tcp_opt_test(sp->fd, wa->acceptlsock->uds);
-		need_test = 0;
+	if (wa->acceptlsock->test_heritage) {
+		vca_sock_opt_test(wa->acceptlsock, sp);
+		wa->acceptlsock->test_heritage = 0;
 	}
-	vca_tcp_opt_set(sp->fd, wa->acceptlsock->uds, 0);
+	vca_sock_opt_set(wa->acceptlsock, sp);
 
 	req = Req_New(sp);
 	CHECK_OBJ_NOTNULL(req, REQ_MAGIC);
@@ -583,13 +646,24 @@ vca_acct(void *arg)
 
 	while (1) {
 		(void)sleep(1);
-		if (vca_tcp_opt_init()) {
+		if (vca_sock_opt_init()) {
 			AZ(pthread_mutex_lock(&shut_mtx));
 			VTAILQ_FOREACH(ls, &heritage.socks, list) {
 				if (ls->sock == -2)
 					continue;	// VCA_Shutdown
 				assert (ls->sock > 0);
-				vca_tcp_opt_set(ls->sock, ls->uds, 1);
+				vca_sock_opt_set(ls, NULL);
+				/* If one of the options on a socket has
+				 * changed, also force a retest of whether
+				 * the values are inherited to the
+				 * accepted sockets. This should then
+				 * catch any false positives from previous
+				 * tests that could happen if the set
+				 * value of an option happened to just be
+				 * the OS default for that value, and
+				 * wasn't actually inherited from the
+				 * listening socket. */
+				ls->test_heritage = 1;
 			}
 			AZ(pthread_mutex_unlock(&shut_mtx));
 		}
@@ -609,7 +683,7 @@ ccf_start(struct cli *cli, const char * const *av, void *priv)
 	(void)av;
 	(void)priv;
 
-	(void)vca_tcp_opt_init();
+	(void)vca_sock_opt_init();
 
 	VTAILQ_FOREACH(ls, &heritage.socks, list) {
 		CHECK_OBJ_NOTNULL(ls->transport, TRANSPORT_MAGIC);
@@ -625,14 +699,17 @@ ccf_start(struct cli *cli, const char * const *av, void *priv)
 			    ls->endpoint, VAS_errtxt(errno));
 			return;
 		}
-		vca_tcp_opt_set(ls->sock, ls->uds, 1);
+		AZ(ls->conn_heritage);
+		ls->conn_heritage = calloc(n_sock_opts,
+		    sizeof *ls->conn_heritage);
+		AN(ls->conn_heritage);
+		ls->test_heritage = 1;
+		vca_sock_opt_set(ls, NULL);
 		if (cache_param->accept_filter && VTCP_filter_http(ls->sock))
 			VSL(SLT_Error, 0,
 			    "Kernel filtering: sock=%d, errno=%d %s",
 			    ls->sock, errno, VAS_errtxt(errno));
 	}
-
-	need_test = 1;
 
 	AZ(pthread_create(&VCA_thread, NULL, vca_acct, NULL));
 }
@@ -728,9 +805,9 @@ XPORT_Init(void)
 
 	ASSERT_MGT();
 
-	XPORT_Register(&PROXY_transport);
-	XPORT_Register(&HTTP1_transport);
-	XPORT_Register(&H2_transport);
+#define TRANSPORT_MACRO(name) XPORT_Register(&name##_transport);
+	TRANSPORTS
+#undef TRANSPORT_MACRO
 }
 
 const struct transport *

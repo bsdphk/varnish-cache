@@ -92,7 +92,7 @@ CLI_CMD(VCL_INLINE,
 CLI_CMD(VCL_STATE,
 	"vcl.state",
 	"vcl.state <configname> [auto|cold|warm]",
-	"Force the state of the named configuration.",
+	"  Force the state of the named configuration.",
 	"",
 	2, 2
 )
@@ -101,7 +101,7 @@ CLI_CMD(VCL_DISCARD,
 	"vcl.discard",
 	"vcl.discard <name_pattern>...",
 	"Unload the named configurations (when possible).",
-	"Unload the named configurations and labels matching at least"
+	"  Unload the named configurations and labels matching at least"
 	" one name pattern. All matching configurations and labels"
 	" are discarded in the correct order with respect to potential"
 	" dependencies. If one configuration or label could not be"
@@ -139,17 +139,17 @@ CLI_CMD(VCL_DEPS,
 	" separated by white space with the fields:\n\n"
 	"  * VCL: a VCL program\n\n"
 	"  * Dependency: another VCL program it depends on\n\n"
-	"Only direct dependencies are listed, and VCLs with"
+	"  Only direct dependencies are listed, and VCLs with"
 	" multiple dependencies are listed multiple times.",
 	0, 0
 )
 
 CLI_CMD(VCL_SHOW,
 	"vcl.show",
-	"vcl.show [-v] <configname>",
+	"vcl.show [-v] [<configname>]",
 	"Display the source code for the specified configuration.",
 	"",
-	1, 2
+	0, 2
 )
 
 CLI_CMD(VCL_USE,
@@ -164,9 +164,9 @@ CLI_CMD(VCL_LABEL,
 	"vcl.label",
 	"vcl.label <label> <configname>",
 	"Apply label to configuration.",
-	"A VCL label is like a UNIX symbolic link, "
-	"a name without substance, which points to another VCL.\n\n"
-	"Labels are mandatory whenever one VCL references another.",
+	"  A VCL label is like a UNIX symbolic link, "
+	" a name without substance, which points to another VCL.\n\n"
+	"  Labels are mandatory whenever one VCL references another.",
 	2, 2
 )
 
@@ -195,9 +195,14 @@ CLI_CMD(PARAM_SHOW,
 
 CLI_CMD(PARAM_SET,
 	"param.set",
-	"param.set <param> <value>",
+	"param.set [-j] <param> <value>",
 	"Set parameter value.",
-	"",
+	"  The JSON output is the same as ``param.show -j <param>`` and"
+	" contains the updated value as it would be represented by a"
+	" subsequent execution of ``param.show``.\n\n"
+	"  This can be useful to later verify that a parameter value didn't"
+	" change and to use the value from the JSON output to reset the"
+	" parameter to the desired value.",
 	2,2
 )
 
@@ -227,7 +232,7 @@ CLI_CMD(PING,
 
 CLI_CMD(HELP,
 	"help",
-	"help [-j] [<command>]",
+	"help [-j|<command>]",
 	"Show command/protocol help.",
 	"  ``-j`` specifies JSON output.",
 	0, 1
@@ -359,12 +364,21 @@ CLI_CMD(DEBUG_REQPOOLFAIL,
 	"allocations will fail.",
 	1, 1
 )
+
+CLI_CMD(DEBUG_SHUTDOWN_DELAY,
+	"debug.shutdown.delay",
+	"debug.shutdown.delay",
+	"Add a delay to the child process shutdown.",
+	"",
+	1, 1
+)
+
 CLI_CMD(DEBUG_XID,
 	"debug.xid",
-	"debug.xid",
-	"Examine or set XID.",
+	"debug.xid [<xid> [<cachesize>]]",
+	"Examine or set XID. <cachesize> defaults to 1.",
 	"",
-	0, 1
+	0, 2
 )
 
 CLI_CMD(DEBUG_SRANDOM,

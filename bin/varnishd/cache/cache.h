@@ -73,11 +73,19 @@ typedef const char *hdr_t;
 
 /*--------------------------------------------------------------------*/
 
-enum sess_close {
-	SC_NULL = 0,
-#define SESS_CLOSE(nm, stat, err, desc)	SC_##nm,
-#include "tbl/sess_close.h"
+struct stream_close {
+	unsigned		magic;
+#define STREAM_CLOSE_MAGIC	0xc879c93d
+	int			idx;
+	unsigned		is_err;
+	const char		*name;
+	const char		*desc;
 };
+    extern const struct stream_close SC_NULL[1];
+#define SESS_CLOSE(nm, stat, err, desc) \
+    extern const struct stream_close SC_##nm[1];
+#include "tbl/sess_close.h"
+
 
 /*--------------------------------------------------------------------
  * Indices into http->hd[]
@@ -393,6 +401,7 @@ struct busyobj {
 
 	/* Timers */
 	vtim_real		t_first;	/* First timestamp logged */
+	vtim_real		t_resp;		/* response received */
 	vtim_real		t_prev;		/* Previous timestamp logged */
 
 	/* Acct */
@@ -431,7 +440,7 @@ struct req {
 #define REQ_MAGIC		0xfb4abf6d
 
 	body_status_t		req_body_status;
-	enum sess_close		doclose;
+	stream_close_t		doclose;
 	unsigned		restarts;
 	unsigned		esi_level;
 
@@ -484,6 +493,7 @@ struct req {
 	vtim_real		t_first;	/* First timestamp logged */
 	vtim_real		t_prev;		/* Previous timestamp logged */
 	vtim_real		t_req;		/* Headers complete */
+	vtim_real		t_resp;		/* Entry to last deliver/synth */
 
 	struct http_conn	*htc;
 	struct vfp_ctx		*vfc;
@@ -583,6 +593,7 @@ void HTTP_Clone(struct http *to, const struct http * const fm);
 void HTTP_Dup(struct http *to, const struct http * const fm);
 struct http *HTTP_create(void *p, uint16_t nhttp, unsigned);
 const char *http_Status2Reason(unsigned, const char **);
+int http_IsHdr(const txt *hh, hdr_t hdr);
 unsigned http_EstimateWS(const struct http *fm, unsigned how);
 void http_PutResponse(struct http *to, const char *proto, uint16_t status,
     const char *response);
@@ -625,7 +636,7 @@ int HTTP_IterHdrPack(struct worker *, struct objcore *, const char **);
 #define HTTP_FOREACH_PACK(wrk, oc, ptr) \
 	 for ((ptr) = NULL; HTTP_IterHdrPack(wrk, oc, &(ptr));)
 const char *HTTP_GetHdrPack(struct worker *, struct objcore *, hdr_t);
-enum sess_close http_DoConnection(struct http *hp, enum sess_close sc_close);
+stream_close_t http_DoConnection(struct http *hp, stream_close_t sc_close);
 int http_IsFiltered(const struct http *hp, unsigned u, unsigned how);
 
 #define HTTPH_R_PASS		(1 << 0)	/* Request (c->b) in pass mode */

@@ -97,7 +97,7 @@ struct http_conn {
 #define HTTP_CONN_MAGIC		0x3e19edd1
 
 	int			*rfd;
-	enum sess_close		doclose;
+	stream_close_t		doclose;
 	body_status_t		body_status;
 	struct ws		*ws;
 	char			*rxbuf_b;
@@ -162,7 +162,6 @@ void VCA_Shutdown(void);
 
 /* cache_backend_cfg.c */
 void VBE_InitCfg(void);
-void VBE_Poll(void);
 
 void VBP_Init(void);
 
@@ -184,7 +183,7 @@ void VBO_ReleaseBusyObj(struct worker *wrk, struct busyobj **busyobj);
 int VDI_GetHdr(struct busyobj *);
 VCL_IP VDI_GetIP(struct busyobj *);
 void VDI_Finish(struct busyobj *bo);
-enum sess_close VDI_Http1Pipe(struct req *, struct busyobj *);
+stream_close_t VDI_Http1Pipe(struct req *, struct busyobj *);
 void VDI_Panic(const struct director *, struct vsb *, const char *nm);
 void VDI_Event(const struct director *d, enum vcl_event_e ev);
 void VDI_Init(void);
@@ -194,7 +193,8 @@ void VDP_Init(struct vdp_ctx *vdx, struct worker *wrk, struct vsl_log *vsl,
     struct req *req);
 uint64_t VDP_Close(struct vdp_ctx *);
 void VDP_Panic(struct vsb *vsb, const struct vdp_ctx *vdc);
-int VDP_Push(struct vdp_ctx *, struct ws *, const struct vdp *, void *priv);
+int VDP_Push(VRT_CTX, struct vdp_ctx *, struct ws *, const struct vdp *,
+    void *priv);
 int VDP_DeliverObj(struct vdp_ctx *vdc, struct objcore *oc);
 extern const struct vdp VDP_gunzip;
 extern const struct vdp VDP_esi;
@@ -282,7 +282,7 @@ struct vfp_entry *VFP_Push(struct vfp_ctx *, const struct vfp *);
 enum vfp_status VFP_GetStorage(struct vfp_ctx *, ssize_t *sz, uint8_t **ptr);
 void VFP_Extend(const struct vfp_ctx *, ssize_t sz, enum vfp_status);
 void VFP_Setup(struct vfp_ctx *vc, struct worker *wrk);
-int VFP_Open(struct vfp_ctx *);
+int VFP_Open(VRT_CTX, struct vfp_ctx *);
 uint64_t VFP_Close(struct vfp_ctx *);
 
 extern const struct vfp VFP_gunzip;
@@ -383,8 +383,6 @@ int PAN__DumpStruct(struct vsb *vsb, int block, int track, const void *ptr,
 #define PAN_dump_once_oneline(vsb, ptr, magic, ...)		\
     PAN__DumpStruct(vsb, 0, 0, ptr, #magic, magic, __VA_ARGS__)
 
-const char *sess_close_2str(enum sess_close sc, int want_desc);
-
 /* cache_pool.c */
 void Pool_Init(void);
 int Pool_Task(struct pool *pp, struct pool_task *task, enum task_prio prio);
@@ -404,7 +402,7 @@ struct req *Req_New(struct sess *);
 void Req_Release(struct req *);
 void Req_Rollback(VRT_CTX);
 void Req_Cleanup(struct sess *sp, struct worker *wrk, struct req *req);
-void Req_Fail(struct req *req, enum sess_close reason);
+void Req_Fail(struct req *req, stream_close_t reason);
 void Req_AcctLogCharge(struct VSC_main_wrk *, struct req *);
 void Req_LogHit(struct worker *, struct req *, struct objcore *, intmax_t);
 
@@ -525,6 +523,7 @@ void VMOD_Panic(struct vsb *);
 /* cache_wrk.c */
 void WRK_Init(void);
 void WRK_AddStat(const struct worker *);
+void WRK_Log(enum VSL_tag_e, const char *, ...);
 
 /* cache_ws.c */
 void WS_Panic(struct vsb *, const struct ws *);
@@ -571,10 +570,17 @@ void SMP_Ready(void);
 #endif
 
 #define FEATURE(x)	COM_FEATURE(cache_param->feature_bits, x)
+#define EXPERIMENT(x)	COM_EXPERIMENT(cache_param->experimental_bits, x)
 #define DO_DEBUG(x)	COM_DO_DEBUG(cache_param->debug_bits, x)
 
 #define DSL(debug_bit, id, ...)					\
 	do {							\
 		if (DO_DEBUG(debug_bit))			\
 			VSL(SLT_Debug, (id), __VA_ARGS__);	\
+	} while (0)
+
+#define DSLb(debug_bit, ...)					\
+	do {							\
+		if (DO_DEBUG(debug_bit))			\
+			WRK_Log(SLT_Debug, __VA_ARGS__);	\
 	} while (0)

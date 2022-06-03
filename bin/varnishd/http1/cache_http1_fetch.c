@@ -55,7 +55,7 @@ vbf_iter_req_body(void *priv, unsigned flush, const void *ptr, ssize_t l)
 
 	if (l > 0) {
 		(void)V1L_Write(bo->wrk, ptr, l);
-		if (flush && V1L_Flush(bo->wrk))
+		if (flush && V1L_Flush(bo->wrk) != SC_NULL)
 			return (-1);
 	}
 	return (0);
@@ -74,7 +74,7 @@ V1F_SendReq(struct worker *wrk, struct busyobj *bo, uint64_t *ctr_hdrbytes,
     uint64_t *ctr_bodybytes)
 {
 	struct http *hp;
-	enum sess_close sc;
+	stream_close_t sc;
 	ssize_t i;
 	uint64_t bytes, hdrbytes;
 	struct http_conn *htc;
@@ -139,6 +139,7 @@ V1F_SendReq(struct worker *wrk, struct busyobj *bo, uint64_t *ctr_hdrbytes,
 	}
 
 	sc = V1L_Close(wrk, &bytes);
+	CHECK_OBJ_NOTNULL(sc, STREAM_CLOSE_MAGIC);
 
 	/* Bytes accounting */
 	if (bytes < hdrbytes)
@@ -151,13 +152,15 @@ V1F_SendReq(struct worker *wrk, struct busyobj *bo, uint64_t *ctr_hdrbytes,
 	if (sc == SC_NULL && i < 0)
 		sc = SC_TX_ERROR;
 
+	CHECK_OBJ_NOTNULL(sc, STREAM_CLOSE_MAGIC);
 	if (sc != SC_NULL) {
-		VSLb(bo->vsl, SLT_FetchError, "backend write error: %d (%s)",
-		    errno, VAS_errtxt(errno));
+		VSLb(bo->vsl, SLT_FetchError, "backend write error: %d (%s) (%s",
+		    errno, VAS_errtxt(errno), sc->desc);
 		VSLb_ts_busyobj(bo, "Bereq", W_TIM_real(wrk));
 		htc->doclose = sc;
 		return (-1);
 	}
+	CHECK_OBJ_NOTNULL(sc, STREAM_CLOSE_MAGIC);
 	VSLb_ts_busyobj(bo, "Bereq", W_TIM_real(wrk));
 	return (0);
 }

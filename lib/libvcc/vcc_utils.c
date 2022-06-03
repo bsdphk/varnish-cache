@@ -48,32 +48,41 @@
 
 /*--------------------------------------------------------------------*/
 
-void
-vcc_regexp(struct vcc *tl, struct vsb *vgc_name)
+static void
+vcc_cstrcat(struct vcc *tl, struct vsb *vsb)
 {
-	struct vsb *pattern;
-	char buf[BUFSIZ];
-	vre_t *t;
-	int error, erroroffset;
 	struct token *t1;
-	struct inifin *ifp;
-
-	pattern = VSB_new_auto();
-	AN(pattern);
 
 	assert(tl->t->tok == CSTR);
-	VSB_cat(pattern, tl->t->dec);
+	VSB_cat(vsb, tl->t->dec);
 
 	t1 = vcc_PeekToken(tl);
 	AN(t1);
+
 	while (t1->tok == '+') {
 		vcc_NextToken(tl);
 		SkipToken(tl, '+');
 		ExpectErr(tl, CSTR);
-		VSB_cat(pattern, tl->t->dec);
+		VSB_cat(vsb, tl->t->dec);
 		t1 = vcc_PeekToken(tl);
 		AN(t1);
 	}
+}
+
+void
+vcc_regexp(struct vcc *tl, struct vsb *vgc_name)
+{
+	struct vsb *pattern;
+	struct token *t0;
+	char buf[BUFSIZ];
+	vre_t *t;
+	int error, erroroffset;
+	struct inifin *ifp;
+
+	t0 = tl->t;
+	pattern = VSB_new_auto();
+	AN(pattern);
+	vcc_cstrcat(tl, pattern);
 	AZ(VSB_finish(pattern));
 
 	t = VRE_compile(VSB_data(pattern), 0, &error, &erroroffset, 0);
@@ -81,7 +90,7 @@ vcc_regexp(struct vcc *tl, struct vsb *vgc_name)
 		VSB_cat(tl->sb, "Regexp compilation error:\n\n");
 		AZ(VRE_error(tl->sb, error));
 		VSB_cat(tl->sb, "\n\n");
-		vcc_ErrWhere(tl, tl->t);
+		vcc_ErrWhere2(tl, t0, tl->t);
 		VSB_destroy(&pattern);
 		return;
 	}

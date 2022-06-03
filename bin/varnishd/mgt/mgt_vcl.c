@@ -63,7 +63,7 @@ static unsigned vcl_count;
 struct vclproghead vclhead = VTAILQ_HEAD_INITIALIZER(vclhead);
 static struct vclproghead discardhead = VTAILQ_HEAD_INITIALIZER(discardhead);
 struct vmodfilehead vmodhead = VTAILQ_HEAD_INITIALIZER(vmodhead);
-static struct vclprog		*active_vcl;
+static struct vclprog *mgt_vcl_active;
 static struct vev *e_poker;
 
 static int mgt_vcl_setstate(struct cli *, struct vclprog *,
@@ -281,11 +281,16 @@ mgt_vcl_del(struct vclprog *vp)
 	FREE_OBJ(vp);
 }
 
-int
+const char *
 mgt_has_vcl(void)
 {
-
-	return (!VTAILQ_EMPTY(&vclhead));
+	if (VTAILQ_EMPTY(&vclhead))
+		return ("No VCL loaded");
+	if (mgt_vcl_active == NULL)
+		return ("No active VCL");
+	CHECK_OBJ_NOTNULL(mgt_vcl_active, VCLPROG_MAGIC);
+	AN(mgt_vcl_active->warm);
+	return (NULL);
 }
 
 /*
@@ -300,7 +305,7 @@ mgt_vcl_set_cooldown(struct vclprog *vp, vtim_mono now)
 {
 	CHECK_OBJ_NOTNULL(vp, VCLPROG_MAGIC);
 
-	if (vp == active_vcl ||
+	if (vp == mgt_vcl_active ||
 	    vp->state != VCL_STATE_AUTO ||
 	    vp->warm == 0 ||
 	    !VTAILQ_EMPTY(&vp->dto) ||
@@ -401,7 +406,7 @@ mgt_vcl_setstate(struct cli *cli, struct vclprog *vp, const struct vclstate *vs)
 	os = vp->state;
 	vp->state = vs;
 
-	if (vp == active_vcl) {
+	if (vp == mgt_vcl_active) {
 		assert (vs == VCL_STATE_WARM || vs == VCL_STATE_AUTO);
 		AN(vp->warm);
 		warm = 1;
@@ -421,7 +426,7 @@ mgt_vcl_setstate(struct cli *cli, struct vclprog *vp, const struct vclstate *vs)
 
 /*--------------------------------------------------------------------*/
 
-static int
+static struct vclprog *
 mgt_new_vcl(struct cli *cli, const char *vclname, const char *vclsrc,
     const char *vclsrcfile, const char *state, int C_flag)
 {
@@ -437,7 +442,7 @@ mgt_new_vcl(struct cli *cli, const char *vclname, const char *vclsrc,
 		VCLI_Out(cli, "Too many (%d) VCLs already loaded\n", vcl_count);
 		VCLI_Out(cli, "(See max_vcl and max_vcl_handling parameters)");
 		VCLI_SetResult(cli, CLIS_CANT);
-		return (0);
+		return (NULL);
 	}
 
 	if (state == NULL)
@@ -446,20 +451,17 @@ mgt_new_vcl(struct cli *cli, const char *vclname, const char *vclsrc,
 		vs = mcf_vcl_parse_state(cli, state);
 
 	if (vs == NULL)
-		return (0);
+		return (NULL);
 
 	vp = mgt_vcl_add(vclname, vs);
 	lib = mgt_VccCompile(cli, vp, vclname, vclsrc, vclsrcfile, C_flag);
 	if (lib == NULL) {
 		mgt_vcl_del(vp);
-		return (0);
+		return (NULL);
 	}
 
 	AZ(C_flag);
 	vp->fname = lib;
-
-	if (active_vcl == NULL)
-		active_vcl = vp;
 
 	if ((cli->result == CLIS_OK || cli->result == CLIS_TRUNCATED) &&
 	    vcl_count > mgt_param.max_vcl &&
@@ -470,7 +472,7 @@ mgt_new_vcl(struct cli *cli, const char *vclname, const char *vclsrc,
 	}
 
 	if (!MCH_Running())
-		return (0);
+		return (vp);
 
 	if (mgt_cli_askchild(&status, &p, "vcl.load %s %s %d%s\n",
 	    vp->name, vp->fname, vp->warm, vp->state->name)) {
@@ -478,12 +480,12 @@ mgt_new_vcl(struct cli *cli, const char *vclname, const char *vclsrc,
 		VCLI_Out(cli, "%s", p);
 		VCLI_SetResult(cli, status);
 		free(p);
-		return (0);
+		return (NULL);
 	}
 	free(p);
 
 	mgt_vcl_set_cooldown(vp, VTIM_mono());
-	return (1);
+	return (vp);
 }
 
 /*--------------------------------------------------------------------*/
@@ -494,6 +496,9 @@ mgt_vcl_startup(struct cli *cli, const char *vclsrc, const char *vclname,
 {
 	char buf[20];
 	static int n = 0;
+	struct vclprog *vp;
+
+	AZ(MCH_Running());
 
 	AN(vclsrc);
 	AN(origin);
@@ -501,8 +506,13 @@ mgt_vcl_startup(struct cli *cli, const char *vclsrc, const char *vclname,
 		bprintf(buf, "boot%d", n++);
 		vclname = buf;
 	}
-	active_vcl = NULL;
-	(void)mgt_new_vcl(cli, vclname, vclsrc, origin, NULL, C_flag);
+	vp = mgt_new_vcl(cli, vclname, vclsrc, origin, NULL, C_flag);
+	if (vp != NULL) {
+		/* Last startup VCL becomes the automatically selected
+		 * active VCL. */
+		AN(vp->warm);
+		mgt_vcl_active = vp;
+	}
 }
 
 /*--------------------------------------------------------------------*/
@@ -514,7 +524,7 @@ mgt_push_vcls(struct cli *cli, unsigned *status, char **p)
 	struct vcldep *vd;
 	int done;
 
-	AN(active_vcl);
+	AN(mgt_vcl_active);
 
 	/* The VCL has not been loaded yet, it cannot fail */
 	(void)cli;
@@ -554,8 +564,10 @@ mgt_push_vcls(struct cli *cli, unsigned *status, char **p)
 		}
 	} while (!done);
 
-	if (mgt_cli_askchild(status, p, "vcl.use \"%s\"\n", active_vcl->name))
+	if (mgt_cli_askchild(status, p, "vcl.use \"%s\"\n",
+	      mgt_vcl_active->name)) {
 		return (1);
+	}
 	free(*p);
 	*p = NULL;
 	return (0);
@@ -566,25 +578,29 @@ mgt_push_vcls(struct cli *cli, unsigned *status, char **p)
 static void v_matchproto_(cli_func_t)
 mcf_vcl_inline(struct cli *cli, const char * const *av, void *priv)
 {
+	struct vclprog *vp;
 
 	(void)priv;
 
 	if (!mcf_find_no_vcl(cli, av[2]))
 		return;
 
-	if (!mgt_new_vcl(cli, av[2], av[3], "<vcl.inline>", av[4], 0))
+	vp = mgt_new_vcl(cli, av[2], av[3], "<vcl.inline>", av[4], 0);
+	if (vp != NULL && !MCH_Running())
 		VCLI_Out(cli, "VCL compiled.\n");
 }
 
 static void v_matchproto_(cli_func_t)
 mcf_vcl_load(struct cli *cli, const char * const *av, void *priv)
 {
+	struct vclprog *vp;
 
 	(void)priv;
 	if (!mcf_find_no_vcl(cli, av[2]))
 		return;
 
-	if (!mgt_new_vcl(cli, av[2], NULL, av[3], av[4], 0))
+	vp = mgt_new_vcl(cli, av[2], NULL, av[3], av[4], 0);
+	if (vp != NULL && !MCH_Running())
 		VCLI_Out(cli, "VCL compiled.\n");
 }
 
@@ -617,7 +633,7 @@ mcf_vcl_state(struct cli *cli, const char * const *av, void *priv)
 			VCLI_SetResult(cli, CLIS_CANT);
 			return;
 		}
-		if (vp == active_vcl) {
+		if (vp == mgt_vcl_active) {
 			VCLI_Out(cli, "Cannot set the active VCL cold.");
 			VCLI_SetResult(cli, CLIS_CANT);
 			return;
@@ -639,7 +655,7 @@ mcf_vcl_use(struct cli *cli, const char * const *av, void *priv)
 	vp = mcf_find_vcl(cli, av[2]);
 	if (vp == NULL)
 		return;
-	if (vp == active_vcl)
+	if (vp == mgt_vcl_active)
 		return;
 
 	if (mgt_vcl_requirewarm(cli, vp))
@@ -651,8 +667,8 @@ mcf_vcl_use(struct cli *cli, const char * const *av, void *priv)
 		VCLI_Out(cli, "%s", p);
 	} else {
 		VCLI_Out(cli, "VCL '%s' now active", av[2]);
-		vp2 = active_vcl;
-		active_vcl = vp;
+		vp2 = mgt_vcl_active;
+		mgt_vcl_active = vp;
 		now = VTIM_mono();
 		mgt_vcl_set_cooldown(vp, now);
 		if (vp2 != NULL)
@@ -669,7 +685,7 @@ mgt_vcl_discard(struct cli *cli, struct vclprog *vp)
 
 	AN(vp);
 	AN(vp->discard);
-	assert(vp != active_vcl);
+	assert(vp != mgt_vcl_active);
 
 	while (!VTAILQ_EMPTY(&vp->dto))
 		mgt_vcl_discard(cli, VTAILQ_FIRST(&vp->dto)->from);
@@ -699,7 +715,7 @@ mgt_vcl_discard_mark(struct cli *cli, const char *glob)
 	VTAILQ_FOREACH(vp, &vclhead, list) {
 		if (fnmatch(glob, vp->name, 0))
 			continue;
-		if (vp == active_vcl) {
+		if (vp == mgt_vcl_active) {
 			VCLI_SetResult(cli, CLIS_CANT);
 			VCLI_Out(cli, "Cannot discard active VCL program %s\n",
 			    vp->name);
@@ -754,7 +770,7 @@ mgt_vcl_discard_depcheck(struct cli *cli)
 	struct vclprog *vp;
 	struct vcldep *vd;
 
-	VTAILQ_FOREACH(vp, &discardhead, list) {
+	VTAILQ_FOREACH(vp, &discardhead, discard_list) {
 		VTAILQ_FOREACH(vd, &vp->dto, lto)
 			if (!vd->from->discard) {
 				mgt_vcl_discard_depfail(cli, vp);
@@ -829,7 +845,7 @@ mcf_vcl_list(struct cli *cli, const char * const *av, void *priv)
 
 		VTAILQ_FOREACH(vp, &vclhead, list) {
 			VSB_printf(vsb, "%s",
-			    vp == active_vcl ? "active" : "available");
+			    vp == mgt_vcl_active ? "active" : "available");
 			vs = vp->warm ?  VCL_STATE_WARM : VCL_STATE_COLD;
 			VSB_printf(vsb, "\t%s\t%s", vp->state->name, vs->name);
 			VSB_printf(vsb, "\t%6s\t%s", "-", vp->name);
@@ -875,7 +891,7 @@ mcf_vcl_list_json(struct cli *cli, const char * const *av, void *priv)
 			VCLI_Out(cli, "{\n");
 			VSB_indent(cli->sb, 2);
 			VCLI_Out(cli, "\"status\": \"%s\",\n",
-			    vp == active_vcl ? "active" : "available");
+			    vp == mgt_vcl_active ? "active" : "available");
 			VCLI_Out(cli, "\"state\": \"%s\",\n", vp->state->name);
 			vs = vp->warm ?  VCL_STATE_WARM : VCL_STATE_COLD;
 			VCLI_Out(cli, "\"temperature\": \"%s\",\n", vs->name);
@@ -1097,7 +1113,7 @@ mgt_vcl_atexit(void)
 
 	if (getpid() != heritage.mgt_pid)
 		return;
-	active_vcl = NULL;
+	mgt_vcl_active = NULL;
 	while (!VTAILQ_EMPTY(&vclhead))
 		VTAILQ_FOREACH_SAFE(vp, &vclhead, list, vp2)
 			if (VTAILQ_EMPTY(&vp->dto))

@@ -153,15 +153,13 @@ Req_New(struct sess *sp)
 	INIT_OBJ(req->vfc, VFP_CTX_MAGIC);
 	p = (void*)PRNDUP(p + sizeof(*req->vfc));
 
-	req->htc = (void*)p;
-	p = (void*)PRNDUP(p + sizeof(*req->htc));
-
 	req->vdc = (void*)p;
 	memset(req->vdc, 0, sizeof *req->vdc);
 	p = (void*)PRNDUP(p + sizeof(*req->vdc));
 
 	req->htc = (void*)p;
 	INIT_OBJ(req->htc, HTTP_CONN_MAGIC);
+	req->htc->doclose = SC_NULL;
 	p = (void*)PRNDUP(p + sizeof(*req->htc));
 
 	req->top = (void*)p;
@@ -176,8 +174,8 @@ Req_New(struct sess *sp)
 	req->t_first = NAN;
 	req->t_prev = NAN;
 	req->t_req = NAN;
-
 	req->req_step = R_STP_TRANSPORT;
+	req->doclose = SC_NULL;
 
 	return (req);
 }
@@ -235,6 +233,7 @@ Req_Rollback(VRT_CTX)
 		VCL_TaskEnter(req->top->privs);
 	HTTP_Clone(req->http, req->http0);
 	req->filter_list = NULL;
+	req->vcf = NULL;
 	if (WS_Overflowed(req->ws))
 		req->wrk->stats->ws_client_overflow++;
 	AN(req->ws_req);
@@ -256,7 +255,7 @@ Req_Cleanup(struct sess *sp, struct worker *wrk, struct req *req)
 	if (IS_TOPREQ(req))
 		AZ(req->top->vcl0);
 
-	req->director_hint = NULL;
+	AZ(req->director_hint);
 	req->restarts = 0;
 
 	if (req->vcl != NULL)
@@ -287,16 +286,21 @@ Req_Cleanup(struct sess *sp, struct worker *wrk, struct req *req)
 	req->esi_level = 0;
 	req->is_hit = 0;
 	req->req_step = R_STP_TRANSPORT;
+	req->vcf = NULL;
+	req->doclose = SC_NULL;
+	req->htc->doclose = SC_NULL;
 
 	if (WS_Overflowed(req->ws))
 		wrk->stats->ws_client_overflow++;
+
+	wrk->seen_methods = 0;
 }
 
 /*----------------------------------------------------------------------
  */
 
 void v_matchproto_(vtr_req_fail_f)
-Req_Fail(struct req *req, enum sess_close reason)
+Req_Fail(struct req *req, stream_close_t reason)
 {
 	CHECK_OBJ_NOTNULL(req, REQ_MAGIC);
 

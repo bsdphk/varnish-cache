@@ -35,6 +35,7 @@
 #include <stdio.h>
 
 #include "cache_varnishd.h"
+#include "cache_transport.h"
 #include "common/heritage.h"
 
 #include "vcl.h"
@@ -504,12 +505,21 @@ VRT_r_req_##nm(VRT_CTX)							\
 	return (ctx->req->elem);					\
 }
 
-REQ_VAR_L(backend_hint, director_hint, VCL_BACKEND,)
 REQ_VAR_R(backend_hint, director_hint, VCL_BACKEND)
+
 REQ_VAR_L(ttl, d_ttl, VCL_DURATION, if (!(arg>0.0)) arg = 0;)
 REQ_VAR_R(ttl, d_ttl, VCL_DURATION)
 REQ_VAR_L(grace, d_grace, VCL_DURATION, if (!(arg>0.0)) arg = 0;)
 REQ_VAR_R(grace, d_grace, VCL_DURATION)
+
+VCL_VOID
+VRT_l_req_backend_hint(VRT_CTX, VCL_BACKEND be)
+{
+
+	CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);
+	CHECK_OBJ_NOTNULL(ctx->req, REQ_MAGIC);
+	VRT_Assign_Backend(&ctx->req->director_hint, be);
+}
 
 /*--------------------------------------------------------------------*/
 
@@ -519,7 +529,7 @@ VRT_l_bereq_backend(VRT_CTX, VCL_BACKEND be)
 
 	CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);
 	CHECK_OBJ_NOTNULL(ctx->bo, BUSYOBJ_MAGIC);
-	ctx->bo->director_req = be;
+	VRT_Assign_Backend(&ctx->bo->director_req, be);
 }
 
 VCL_BACKEND
@@ -625,6 +635,18 @@ VRT_r_bereq_retries(VRT_CTX)
 	return (ctx->bo->retries);
 }
 
+/*--------------------------------------------------------------------*/
+
+VCL_STRING
+VRT_r_req_transport(VRT_CTX)
+{
+	CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);
+
+	CHECK_OBJ_NOTNULL(ctx->req, REQ_MAGIC);
+	CHECK_OBJ_NOTNULL(ctx->req->transport, TRANSPORT_MAGIC);
+	return (ctx->req->transport->name);
+}
+
 /*--------------------------------------------------------------------
  * In exp.*:
  *	t_origin is absolute
@@ -697,6 +719,25 @@ VRT_DO_EXP_L(beresp, ctx->bo->fetch_objcore, keep, 0)
 VRT_DO_EXP_R(beresp, ctx->bo->fetch_objcore, keep, 0)
 
 /*lint -restore */
+
+// XXX more assertions?
+#define VRT_DO_TIME_R(which, where, field)				\
+									\
+VCL_TIME								\
+VRT_r_##which##_time(VRT_CTX)						\
+{									\
+	CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);				\
+	AN((ctx)->where);						\
+									\
+	return ((ctx)->where->field);					\
+}
+
+VRT_DO_TIME_R(req, req, t_req)
+VRT_DO_TIME_R(req_top, req->top->topreq, t_req)
+VRT_DO_TIME_R(resp, req, t_resp)
+VRT_DO_TIME_R(bereq, bo, t_first)
+VRT_DO_TIME_R(beresp, bo, t_resp)
+VRT_DO_TIME_R(obj, req->objcore, t_origin)
 
 /*--------------------------------------------------------------------
  */
@@ -937,17 +978,29 @@ VRT_r_resp_do_esi(VRT_CTX)
 #define VRT_BODY_L(which)					\
 VCL_VOID							\
 VRT_l_##which##_body(VRT_CTX, enum lbody_e type,		\
-    const char *str, VCL_STRANDS s)				\
+    const char *str, VCL_BODY body)				\
 {								\
 	int n;							\
 	struct vsb *vsb;					\
+	VCL_STRANDS s;						\
+	VCL_BLOB b;						\
 								\
+	CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);			\
+	AN(body);						\
 	CAST_OBJ_NOTNULL(vsb, ctx->specific, VSB_MAGIC);	\
-	assert(type == LBODY_SET || type == LBODY_ADD);		\
-	if (type == LBODY_SET)					\
+	if (type == LBODY_SET_STRING || type == LBODY_SET_BLOB)	\
 		VSB_clear(vsb);					\
+	if (type == LBODY_SET_BLOB || type == LBODY_ADD_BLOB) {	\
+		AZ(str);					\
+		b = body;					\
+		VSB_bcat(vsb, b->blob, b->len);			\
+		return;						\
+	}							\
 	if (str != NULL)					\
 		VSB_cat(vsb, str);				\
+	assert(type == LBODY_SET_STRING ||			\
+	    type == LBODY_ADD_STRING);				\
+	s = body;						\
 	for (n = 0; s != NULL && n < s->n; n++)			\
 		if (s->p[n] != NULL)				\
 			VSB_cat(vsb, s->p[n]);			\

@@ -101,12 +101,19 @@ static const char ONLY_ROOT_TEXT[] =
 	"NB: This parameter only works if varnishd is run as root.";
 
 static const char NOT_IMPLEMENTED_TEXT[] =
-	"This parameter depends on a feature which is not available"
+	"\n\n"
+	"NB: This parameter depends on a feature which is not available"
 	" on this platform.";
 
 static const char PLATFORM_DEPENDENT_TEXT[] =
+	"\n\n"
 	"NB: This parameter depends on a feature which is not available"
 	" on all platforms.";
+
+static const char BUILD_OPTIONS_TEXT[] =
+	"\n\n"
+	"NB: The actual default value for this parameter depends on the"
+	" Varnish build environment and options.";
 
 /*--------------------------------------------------------------------*/
 
@@ -240,25 +247,42 @@ mcf_wrap(struct cli *cli, const char *text)
 static void v_matchproto_(cli_func_t)
 mcf_param_show(struct cli *cli, const char * const *av, void *priv)
 {
-	int n;
 	struct plist *pl;
-	const struct parspec *pp;
-	int lfmt = 0, chg = 0;
+	const struct parspec *pp, *pa;
+	int n, lfmt = 0, chg = 0;
 	struct vsb *vsb;
+	const char *show = NULL;
+
+	(void)priv;
+
+	for (n = 2; av[n] != NULL; n++) {
+		if (strcmp(av[n], "-l") == 0) {
+			lfmt = 1;
+			continue;
+		}
+		if (strcmp(av[n], "changed") == 0) {
+			chg = 1;
+			continue;
+		}
+		if (show != NULL) {
+			VCLI_SetResult(cli, CLIS_TOOMANY);
+			VCLI_Out(cli, "Too many parameters");
+			return;
+		}
+		show = av[n];
+		lfmt = 1;
+	}
 
 	vsb = VSB_new_auto();
 	AN(vsb);
-	(void)priv;
-
-	if (av[2] != NULL && !strcmp(av[2], "changed"))
-		chg = 1;
-	else if (av[2] != NULL)
-		lfmt = 1;
 
 	n = 0;
 	VTAILQ_FOREACH(pl, &phead, list) {
 		pp = pl->spec;
-		if (lfmt && strcmp(pp->name, av[2]) && strcmp("-l", av[2]))
+		if (lfmt && show != NULL && strcmp(pp->name, show))
+			continue;
+		if (pp->func == tweak_alias &&
+		    (show == NULL || strcmp(pp->name, show)))
 			continue;
 		n++;
 
@@ -292,6 +316,11 @@ mcf_param_show(struct cli *cli, const char * const *av, void *priv)
 		}
 		VCLI_Out(cli, "\n");
 
+		if (lfmt && pp->func == tweak_alias) {
+			pa = TRUST_ME(pp->priv);
+			VCLI_Out(cli, "%-*sAlias of: %s\n",
+			    margin1, " ", pa->name);
+		}
 		if (lfmt && pp->flags & NOT_IMPLEMENTED) {
 			VCLI_Out(cli, "\n");
 			mcf_wrap(cli, NOT_IMPLEMENTED_TEXT);
@@ -324,12 +353,14 @@ mcf_param_show(struct cli *cli, const char * const *av, void *priv)
 				mcf_wrap(cli, PROTECTED_TEXT);
 			if (pp->flags & ONLY_ROOT)
 				mcf_wrap(cli, ONLY_ROOT_TEXT);
+			if (pp->flags & BUILD_OPTIONS)
+				mcf_wrap(cli, BUILD_OPTIONS_TEXT);
 			VCLI_Out(cli, "\n\n");
 		}
 	}
-	if (av[2] != NULL && lfmt && strcmp(av[2], "-l") && n == 0) {
+	if (show != NULL && n == 0) {
 		VCLI_SetResult(cli, CLIS_PARAM);
-		VCLI_Out(cli, "Unknown parameter \"%s\".", av[2]);
+		VCLI_Out(cli, "Unknown parameter \"%s\".", show);
 	}
 	VSB_destroy(&vsb);
 }
@@ -345,12 +376,11 @@ mcf_json_key_valstr(struct cli *cli, const char *key, const char *val)
 static void v_matchproto_(cli_func_t)
 mcf_param_show_json(struct cli *cli, const char * const *av, void *priv)
 {
-	int n, comma = 0;
+	int n, comma = 0, chg = 0;
 	struct plist *pl;
-	const struct parspec *pp;
-	int chg = 0, flags;
+	const struct parspec *pp, *pa;
 	struct vsb *vsb, *def;
-	const char *show = NULL;
+	const char *show = NULL, *sep;
 
 	(void)priv;
 
@@ -366,6 +396,11 @@ mcf_param_show_json(struct cli *cli, const char * const *av, void *priv)
 		}
 		if (strcmp(av[i], "-j") == 0)
 			continue;
+		if (show != NULL) {
+			VCLI_SetResult(cli, CLIS_TOOMANY);
+			VCLI_Out(cli, "Too many parameters");
+			return;
+		}
 		show = av[i];
 	}
 
@@ -380,6 +415,9 @@ mcf_param_show_json(struct cli *cli, const char * const *av, void *priv)
 	VTAILQ_FOREACH(pl, &phead, list) {
 		pp = pl->spec;
 		if (show != NULL && strcmp(pp->name, show) != 0)
+			continue;
+		if (pp->func == tweak_alias &&
+		    (show == NULL || strcmp(pp->name, show)))
 			continue;
 		n++;
 
@@ -399,6 +437,10 @@ mcf_param_show_json(struct cli *cli, const char * const *av, void *priv)
 		VCLI_Out(cli, "{\n");
 		VSB_indent(cli->sb, 2);
 		mcf_json_key_valstr(cli, "name", pp->name);
+		if (pp->func == tweak_alias) {
+			pa = TRUST_ME(pp->priv);
+			mcf_json_key_valstr(cli, "alias", pa->name);
+		}
 		if (pp->flags & NOT_IMPLEMENTED) {
 			VCLI_Out(cli, "\"implemented\": false\n");
 			VSB_indent(cli->sb, -2);
@@ -418,16 +460,15 @@ mcf_param_show_json(struct cli *cli, const char * const *av, void *priv)
 			mcf_json_key_valstr(cli, "maximum", pp->max);
 		mcf_json_key_valstr(cli, "description", pp->descr);
 
-		flags = 0;
-		VCLI_Out(cli, "\"flags\": [\n");
+		VCLI_Out(cli, "\"flags\": [");
 		VSB_indent(cli->sb, 2);
+		sep = "";
 
 #define flag_out(flag, string) do {					\
 			if (pp->flags & flag) {				\
-				if (flags)				\
-					VCLI_Out(cli, ",\n");		\
+				VCLI_Out(cli, "%s\n", sep);		\
 				VCLI_Out(cli, "\"%s\"", #string);	\
-				flags++;				\
+				sep = ",";				\
 			}						\
 		} while(0)
 
@@ -439,13 +480,16 @@ mcf_param_show_json(struct cli *cli, const char * const *av, void *priv)
 		flag_out(WIZARD, wizard);
 		flag_out(PROTECTED, protected);
 		flag_out(ONLY_ROOT, only_root);
+		flag_out(BUILD_OPTIONS, build_options);
 
 #undef flag_out
 
+		if (pp->flags)
+			VCLI_Out(cli, "\n");
 		VSB_indent(cli->sb, -2);
-		VCLI_Out(cli, "\n]");
+		VCLI_Out(cli, "]\n");
 		VSB_indent(cli->sb, -2);
-		VCLI_Out(cli, "\n}");
+		VCLI_Out(cli, "}");
 	}
 	VCLI_JSON_end(cli);
 	if (show != NULL && n == 0) {
@@ -545,6 +589,16 @@ mcf_param_set(struct cli *cli, const char * const *av, void *priv)
 	MCF_ParamSet(cli, av[2], av[3]);
 }
 
+static void v_matchproto_(cli_func_t)
+mcf_param_set_json(struct cli *cli, const char * const *av, void *priv)
+{
+	const char *const avs[] = { av[0], av[1], av[2], av[3], NULL };
+
+	MCF_ParamSet(cli, av[3], av[4]);
+	if (cli->result == CLIS_OK)
+		mcf_param_show_json(cli, avs, priv);
+}
+
 /*--------------------------------------------------------------------*/
 
 static void v_matchproto_(cli_func_t)
@@ -556,16 +610,25 @@ mcf_param_reset(struct cli *cli, const char * const *av, void *priv)
 }
 
 /*--------------------------------------------------------------------
- * Add a group of parameters to the global set and sort by name.
+ * Initialize parameters and sort by name.
  */
 
-void
-MCF_AddParams(struct parspec *ps)
+static struct parspec mgt_parspec[] = {
+#define PARAM_ALL
+#define PARAM_PRE {
+#define PARAM(typ, fld, nm, ...) #nm, __VA_ARGS__
+#define PARAM_POST },
+#include "tbl/params.h"
+	{ NULL, NULL, NULL }
+};
+
+static void
+mcf_init_params(void)
 {
 	struct parspec *pp;
 	const char *s;
 
-	for (pp = ps; pp->name != NULL; pp++) {
+	for (pp = mgt_parspec; pp->name != NULL; pp++) {
 		AN(pp->func);
 		s = strchr(pp->descr, '\0');
 		if (isspace(s[-1])) {
@@ -620,6 +683,13 @@ mcf_wash_param(struct cli *cli, struct parspec *pp, enum mcf_which_e which,
 	}
 	AN(val);
 
+	if (pp->func == tweak_alias) {
+		assert(which == MCF_DEFAULT);
+		pp->priv = mcf_findpar(pp->def);
+		pp->def = NULL;
+		return;
+	}
+
 	VSB_clear(vsb);
 	VSB_printf(vsb, "FAILED to set %s for param %s: %s\n",
 	    name, pp->name, val);
@@ -641,10 +711,9 @@ mcf_wash_param(struct cli *cli, struct parspec *pp, enum mcf_which_e which,
 /*--------------------------------------------------------------------*/
 
 static struct cli_proto cli_params[] = {
-	{ CLICMD_PARAM_SHOW,		"", mcf_param_show,
-	  mcf_param_show_json },
-	{ CLICMD_PARAM_SET,		"", mcf_param_set },
-	{ CLICMD_PARAM_RESET,		"", mcf_param_reset },
+	{ CLICMD_PARAM_SHOW,	"", mcf_param_show, mcf_param_show_json },
+	{ CLICMD_PARAM_SET,	"", mcf_param_set, mcf_param_set_json },
+	{ CLICMD_PARAM_RESET,	"", mcf_param_reset },
 	{ NULL }
 };
 
@@ -660,9 +729,7 @@ MCF_InitParams(struct cli *cli)
 	struct vsb *vsb;
 	ssize_t def, low;
 
-	MCF_AddParams(mgt_parspec);
-	MCF_AddParams(VSL_parspec);
-
+	mcf_init_params();
 	MCF_TcpParams();
 
 	def = 80 * 1024;
@@ -723,6 +790,9 @@ MCF_InitParams(struct cli *cli)
 		mcf_wash_param(cli, pp, MCF_DEFAULT, "default", vsb);
 	}
 	VSB_destroy(&vsb);
+
+	AN(mgt_cc_cmd);
+	REPLACE(mgt_cc_cmd_def, mgt_cc_cmd);
 }
 
 /*--------------------------------------------------------------------*/
@@ -761,6 +831,8 @@ MCF_DumpRstParam(void)
 	    "output from varnishd -x parameter\n\n");
 	VTAILQ_FOREACH(pl, &phead, list) {
 		pp = pl->spec;
+		if (!strcmp("deprecated_dummy", pp->name))
+		    continue;
 		printf(".. _ref_param_%s:\n\n", pp->name);
 		printf("%s\n", pp->name);
 		for (z = 0; z < strlen(pp->name); z++)
@@ -769,6 +841,9 @@ MCF_DumpRstParam(void)
 
 		if (pp->flags && pp->flags & PLATFORM_DEPENDENT)
 			printf("\n%s\n\n", PLATFORM_DEPENDENT_TEXT);
+
+		if (pp->flags && pp->flags & BUILD_OPTIONS)
+			printf("\n%s\n\n", BUILD_OPTIONS_TEXT);
 
 		if (pp->units != NULL && *pp->units != '\0')
 			printf("\t* Units: %s\n", pp->units);
@@ -787,7 +862,7 @@ MCF_DumpRstParam(void)
 		 * XXX: that say if ->min/->max are valid, so we
 		 * XXX: can emit those also in help texts.
 		 */
-		if (pp->flags & ~(NOT_IMPLEMENTED|PLATFORM_DEPENDENT)) {
+		if (pp->flags & ~DOCS_FLAGS) {
 			printf("\t* Flags: ");
 			q = "";
 

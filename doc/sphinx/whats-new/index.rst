@@ -1,5 +1,5 @@
 ..
-	Copyright (c) 2013-2020 Varnish Software AS
+	Copyright (c) 2013-2022 Varnish Software AS
 	SPDX-License-Identifier: BSD-2-Clause
 	See LICENSE file for full text of license
 
@@ -12,6 +12,15 @@ What's new / Upgrading
 This section describes the changes and improvements between different
 versions of Varnish, and what upgrading between the different versions
 entail.
+
+Varnish **7.1**
+---------------
+
+.. toctree::
+   :maxdepth: 2
+
+   changes-7.1
+   upgrading-7.1
 
 Varnish 7.0
 -----------

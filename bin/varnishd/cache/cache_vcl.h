@@ -55,8 +55,7 @@ struct vcl {
 	int			nrefs;
 	struct vcl		*label;
 	int			nlabels;
-	struct vfilter_head	vfps;
-	struct vfilter_head	vdps;
+	struct vfilter_head	filters;
 };
 
 struct vclref {
@@ -71,7 +70,6 @@ extern struct lock		vcl_mtx;
 extern struct vcl		*vcl_active; /* protected by vcl_mtx */
 struct vcl *vcl_find(const char *);
 void VCL_Update(struct vcl **, struct vcl *);
-void vcldir_free(struct vcldir *);
 
 struct vcltemp {
 	const char * const	name;
@@ -88,3 +86,9 @@ extern const struct vcltemp VCL_TEMP_COLD[1];
 extern const struct vcltemp VCL_TEMP_WARM[1];
 extern const struct vcltemp VCL_TEMP_BUSY[1];
 extern const struct vcltemp VCL_TEMP_COOLING[1];
+
+#define ASSERT_VCL_ACTIVE()					\
+	do {							\
+		assert(vcl_active == NULL ||			\
+		    vcl_active->temp->is_warm);			\
+	} while (0)

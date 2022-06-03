@@ -65,6 +65,7 @@ struct ecx {
 	ssize_t		l;
 	int		isgzip;
 	int		woken;
+	int		abrt;
 
 	struct req	*preq;
 	struct ecx	*pecx;
@@ -255,11 +256,12 @@ ved_decode_len(struct vsl_log *vsl, const uint8_t **pp)
  */
 
 static int v_matchproto_(vdp_init_f)
-ved_vdp_esi_init(struct vdp_ctx *vdc, void **priv, struct objcore *oc)
+ved_vdp_esi_init(VRT_CTX, struct vdp_ctx *vdc, void **priv, struct objcore *oc)
 {
 	struct ecx *ecx;
 	struct req *req;
 
+	CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);
 	CHECK_OBJ_NOTNULL(vdc, VDP_CTX_MAGIC);
 	CHECK_OBJ_ORNULL(oc, OBJCORE_MAGIC);
 	if (oc == NULL || !ObjHasAttr(vdc->wrk, oc, OA_ESIDATA))
@@ -377,7 +379,11 @@ ved_vdp_esi_bytes(struct vdp_ctx *vdx, enum vdp_action act, void **priv,
 				Debug("SKIP1(%d)\n", (int)ecx->l);
 				ecx->state = 4;
 				break;
-			case VEC_INCL:
+			case VEC_IA:
+				ecx->abrt =
+				    FEATURE(FEATURE_ESI_INCLUDE_ONERROR);
+				/* FALLTHROUGH */
+			case VEC_IC:
 				ecx->p++;
 				q = (void*)strchr((const char*)ecx->p, '\0');
 				AN(q);
@@ -588,14 +594,15 @@ struct ved_foo {
 	uint8_t			tailbuf[8];
 };
 
-static int v_matchproto_(vdp_fini_f)
-ved_gzgz_init(struct vdp_ctx *vdc, void **priv, struct objcore *oc)
+static int v_matchproto_(vdp_init_f)
+ved_gzgz_init(VRT_CTX, struct vdp_ctx *vdc, void **priv, struct objcore *oc)
 {
 	ssize_t l;
 	const char *p;
 	struct ved_foo *foo;
 	struct req *req;
 
+	CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);
 	CHECK_OBJ_NOTNULL(vdc, VDP_CTX_MAGIC);
 	(void)oc;
 	req = vdc->req;
@@ -800,10 +807,10 @@ ved_gzgz_fini(struct vdp_ctx *vdc, void **priv)
 }
 
 static const struct vdp ved_gzgz = {
-	.name =         "VZZ",
-	.init =         ved_gzgz_init,
-	.bytes =        ved_gzgz_bytes,
-	.fini =         ved_gzgz_fini,
+	.name =		"VZZ",
+	.init =		ved_gzgz_init,
+	.bytes =	ved_gzgz_bytes,
+	.fini =		ved_gzgz_fini,
 };
 
 /*--------------------------------------------------------------------
@@ -844,6 +851,7 @@ ved_deliver(struct req *req, struct boc *boc, int wantbody)
 	const char *p;
 	struct ecx *ecx;
 	struct ved_foo foo[1];
+	struct vrt_ctx ctx[1];
 
 	CHECK_OBJ_NOTNULL(req, REQ_MAGIC);
 	CHECK_OBJ_ORNULL(boc, BOC_MAGIC);
@@ -862,6 +870,9 @@ ved_deliver(struct req *req, struct boc *boc, int wantbody)
 	if (i)
 		i = ObjCheckFlag(req->wrk, req->objcore, OF_GZIPED);
 
+	INIT_OBJ(ctx, VRT_CTX_MAGIC);
+	VCL_Req2Ctx(ctx, req);
+
 	if (ecx->isgzip && i && !(req->res_mode & RES_ESI)) {
 		/* A gzip'ed include which is not ESI processed */
 
@@ -878,14 +889,14 @@ ved_deliver(struct req *req, struct boc *boc, int wantbody)
 		INIT_OBJ(foo, VED_FOO_MAGIC);
 		foo->ecx = ecx;
 		foo->objcore = req->objcore;
-		i = VDP_Push(req->vdc, req->ws, &ved_gzgz, foo);
+		i = VDP_Push(ctx, req->vdc, req->ws, &ved_gzgz, foo);
 
 	} else if (ecx->isgzip && !i) {
 		/* Non-Gzip'ed include in gzip'ed parent */
-		i = VDP_Push(req->vdc, req->ws, &ved_pretend_gz, ecx);
+		i = VDP_Push(ctx, req->vdc, req->ws, &ved_pretend_gz, ecx);
 	} else {
 		/* Anything else goes straight through */
-		i = VDP_Push(req->vdc, req->ws, &ved_ved, ecx);
+		i = VDP_Push(ctx, req->vdc, req->ws, &ved_ved, ecx);
 	}
 
 	if (i == 0) {
@@ -899,4 +910,9 @@ ved_deliver(struct req *req, struct boc *boc, int wantbody)
 		req->doclose = SC_REM_CLOSE;
 
 	req->acct.resp_bodybytes += VDP_Close(req->vdc);
+
+	if (i && ecx->abrt) {
+		req->top->topreq->vdc->retval = -1;
+		req->top->topreq->doclose = req->doclose;
+	}
 }

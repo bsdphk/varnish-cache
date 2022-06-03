@@ -42,7 +42,7 @@ typedef void vtr_deliver_f (struct req *, struct boc *, int sendbody);
 typedef void vtr_req_body_f (struct req *);
 typedef void vtr_sess_panic_f (struct vsb *, const struct sess *);
 typedef void vtr_req_panic_f (struct vsb *, const struct req *);
-typedef void vtr_req_fail_f (struct req *, enum sess_close);
+typedef void vtr_req_fail_f (struct req *, stream_close_t);
 typedef void vtr_reembark_f (struct worker *, struct req *);
 typedef int vtr_minimal_response_f (struct req *, uint16_t status);
 
@@ -69,9 +69,15 @@ struct transport {
 	VTAILQ_ENTRY(transport)		list;
 };
 
-extern struct transport PROXY_transport;
-extern struct transport HTTP1_transport;
-extern struct transport H2_transport;
+#define TRANSPORTS \
+	TRANSPORT_MACRO(PROXY) \
+	TRANSPORT_MACRO(HTTP1) \
+	TRANSPORT_MACRO(HTTP2)
+
+#define TRANSPORT_MACRO(name) extern struct transport name##_transport;
+TRANSPORTS
+#undef TRANSPORT_MACRO
+
 htc_complete_f H2_prism_complete;
 void H2_PU_Sess(struct worker *, struct sess *, struct req *);
 void H2_OU_Sess(struct worker *, struct sess *, struct req *);
@@ -81,8 +87,8 @@ int VPX_Send_Proxy(int fd, int version, const struct sess *);
 
 /* cache_session.c */
 struct sess *SES_New(struct pool *);
-void SES_Delete(struct sess *, enum sess_close reason, vtim_real now);
+void SES_Delete(struct sess *, stream_close_t reason, vtim_real now);
 void SES_DeleteHS(struct sess *, enum htc_status_e hs, vtim_real now);
-void SES_Close(struct sess *, enum sess_close reason);
+void SES_Close(struct sess *, stream_close_t reason);
 void SES_SetTransport(struct worker *, struct sess *, struct req *,
     const struct transport *);

@@ -54,6 +54,7 @@ static ssize_t
 vrb_pull(struct req *req, ssize_t maxsize, objiterate_f *func, void *priv)
 {
 	ssize_t l, r = 0, yet;
+	struct vrt_ctx ctx[1];
 	struct vfp_ctx *vfc;
 	uint8_t *ptr;
 	enum vfp_status vfps = VFP_ERROR;
@@ -87,7 +88,10 @@ vrb_pull(struct req *req, ssize_t maxsize, objiterate_f *func, void *priv)
 
 	vfc->oc = req->body_oc;
 
-	if (VFP_Open(vfc) < 0) {
+	INIT_OBJ(ctx, VRT_CTX_MAGIC);
+	VCL_Req2Ctx(ctx, req);
+
+	if (VFP_Open(ctx, vfc) < 0) {
 		req->req_body_status = BS_ERROR;
 		HSH_DerefBoc(req->wrk, req->body_oc);
 		AZ(HSH_DerefObjCore(req->wrk, &req->body_oc, 0));
@@ -245,11 +249,13 @@ VRB_Ignore(struct req *req)
 
 	CHECK_OBJ_NOTNULL(req, REQ_MAGIC);
 
-	if (req->doclose)
+	if (req->doclose != SC_NULL)
 		return (0);
 	if (req->req_body_status->avail > 0)
 		(void)VRB_Iterate(req->wrk, req->vsl, req,
 		    httpq_req_body_discard, NULL);
+	if (req->req_body_status == BS_ERROR)
+		req->doclose = SC_RX_BODY;
 	return (0);
 }
 

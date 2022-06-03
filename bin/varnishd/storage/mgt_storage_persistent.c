@@ -137,18 +137,15 @@ smp_metrics(struct smp_sc *sc)
  * Set up persistent storage silo in the master process.
  */
 
-void
+void v_matchproto_(storage_init_f)
 smp_mgt_init(struct stevedore *parent, int ac, char * const *av)
 {
 	struct smp_sc		*sc;
 	struct smp_sign		sgn;
 	void *target;
-	int i;
-
-	ASSERT_MGT();
+	int i, mmap_flags;
 
 	AZ(av[ac]);
-
 
 #ifdef HAVE_SYS_PERSONALITY_H
 	i = personality(0xffffffff); /* Fetch old personality. */
@@ -200,17 +197,46 @@ smp_mgt_init(struct stevedore *parent, int ac, char * const *av)
 	/* Try to determine correct mmap address */
 	i = read(sc->fd, &sgn, sizeof sgn);
 	assert(i == sizeof sgn);
-	if (!strcmp(sgn.ident, "SILO"))
+	if (!memcmp(sgn.ident, "SILO", 5))
 		target = (void*)(uintptr_t)sgn.mapped;
 	else
 		target = NULL;
 
+	mmap_flags = MAP_NOCORE | MAP_NOSYNC | MAP_SHARED;
+	if (target) {
+		mmap_flags |= MAP_FIXED;
+#ifdef MAP_EXCL
+		mmap_flags |= MAP_EXCL;
+#endif
+	} else {
+#ifdef __FreeBSD__
+		/*
+		 * I guess the people who came up with ASLR never learned
+		 * that virtual memory can have benficial uses, because they
+		 * added no facility for realiably and portably allocing
+		 * stable address-space.
+		 * This stevedore is only for testing these days, so we
+		 * can get away with just hacking something up: 16M below
+		 * the break seems to work on FreeBSD.
+		 */
+		uintptr_t up;
+		up = (uintptr_t)sbrk(0);
+		up -= 1ULL<<24;
+		up -= sc->mediasize;
+		up &= ~(getpagesize() - 1ULL);
+		target = (void *)up;
+#endif
+
+#ifdef MAP_ALIGNED_SUPER
+		mmap_flags |= MAP_ALIGNED_SUPER;
+#endif
+	}
 	sc->base = (void*)mmap(target, sc->mediasize, PROT_READ|PROT_WRITE,
-	    MAP_NOCORE | MAP_NOSYNC | MAP_SHARED, sc->fd, 0);
+	    mmap_flags, sc->fd, 0);
 
 	if (sc->base == MAP_FAILED)
-		ARGV_ERR("(-spersistent) failed to mmap (%s)\n",
-		    VAS_errtxt(errno));
+		ARGV_ERR("(-spersistent) failed to mmap (%s) @%p\n",
+		    VAS_errtxt(errno), target);
 	if (target != NULL && sc->base != target)
 		fprintf(stderr, "WARNING: Persistent silo lost to ASLR %s\n",
 		    sc->filename);

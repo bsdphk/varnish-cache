@@ -52,7 +52,7 @@ v1d_bytes(struct vdp_ctx *vdx, enum vdp_action act, void **priv,
 
 	if (len > 0)
 		wl = V1L_Write(vdx->wrk, ptr, len);
-	if (act > VDP_NULL && V1L_Flush(vdx->wrk))
+	if (act > VDP_NULL && V1L_Flush(vdx->wrk) != SC_NULL)
 		return (-1);
 	if (len != wl)
 		return (-1);
@@ -88,17 +88,19 @@ v1d_error(struct req *req, const char *msg)
 void v_matchproto_(vtr_deliver_f)
 V1D_Deliver(struct req *req, struct boc *boc, int sendbody)
 {
+	struct vrt_ctx ctx[1];
 	int err = 0, chunked = 0;
-	enum sess_close sc;
+	stream_close_t sc;
 	uint64_t hdrbytes, bytes;
 
 	CHECK_OBJ_NOTNULL(req, REQ_MAGIC);
 	CHECK_OBJ_ORNULL(boc, BOC_MAGIC);
 	CHECK_OBJ_NOTNULL(req->objcore, OBJCORE_MAGIC);
 
-	if (!req->doclose && http_HdrIs(req->resp, H_Connection, "close")) {
+	if (req->doclose == SC_NULL &&
+	    http_HdrIs(req->resp, H_Connection, "close")) {
 		req->doclose = SC_RESP_CLOSE;
-	} else if (req->doclose) {
+	} else if (req->doclose != SC_NULL) {
 		if (!http_HdrIs(req->resp, H_Connection, "close")) {
 			http_Unset(req->resp, H_Connection);
 			http_SetHeader(req->resp, "Connection: close");
@@ -116,7 +118,9 @@ V1D_Deliver(struct req *req, struct boc *boc, int sendbody)
 				req->doclose = SC_TX_EOF;
 			}
 		}
-		if (VDP_Push(req->vdc, req->ws, &v1d_vdp, NULL)) {
+		INIT_OBJ(ctx, VRT_CTX_MAGIC);
+		VCL_Req2Ctx(ctx, req);
+		if (VDP_Push(ctx, req->vdc, req->ws, &v1d_vdp, NULL)) {
 			v1d_error(req, "workspace_thread overflow");
 			AZ(req->wrk->v1l);
 			return;

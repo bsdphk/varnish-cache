@@ -167,7 +167,7 @@ Resp_Setup_Deliver(struct req *req)
 	http_PrintfHeader(h, "Age: %.0f",
 	    floor(fmax(0., req->t_prev - oc->t_origin)));
 
-	http_SetHeader(h, "Via: 1.1 varnish (Varnish/7.0)");
+	http_SetHeader(h, "Via: 1.1 varnish (Varnish/7.1)");
 
 	if (cache_param->http_gzip_support &&
 	    ObjCheckFlag(req->wrk, oc, OF_GZIPED) &&
@@ -231,7 +231,9 @@ cnt_deliver(struct worker *wrk, struct req *req)
 	    !(req->objcore->flags & OC_F_PRIVATE))
 		http_ForceHeader(req->resp, H_Accept_Ranges, "bytes");
 
+	req->t_resp = W_TIM_real(wrk);
 	VCL_deliver_method(req->vcl, wrk, req, NULL, NULL);
+
 	VSLb_ts_req(req, "Process", W_TIM_real(wrk));
 
 	assert(req->restarts <= cache_param->max_restarts);
@@ -324,6 +326,7 @@ cnt_synth(struct worker *wrk, struct req *req)
 	synth_body = VSB_new_auto();
 	AN(synth_body);
 
+	req->t_resp = W_TIM_real(wrk);
 	VCL_synth_method(req->vcl, wrk, req, NULL, synth_body);
 
 	AZ(VSB_finish(synth_body));
@@ -360,7 +363,8 @@ cnt_synth(struct worker *wrk, struct req *req)
 	http_PrintfHeader(req->resp, "Content-Length: %zd",
 	    VSB_len(synth_body));
 
-	if (!req->doclose && http_HdrIs(req->resp, H_Connection, "close"))
+	if (req->doclose == SC_NULL &&
+	    http_HdrIs(req->resp, H_Connection, "close"))
 		req->doclose = SC_RESP_CLOSE;
 
 	/* Discard any lingering request body before delivery */
@@ -486,10 +490,11 @@ cnt_transmit(struct worker *wrk, struct req *req)
 
 	HSH_Cancel(wrk, req->objcore, boc);
 
-	if (!req->doclose && (req->objcore->flags & OC_F_FAILED))
+	if (req->doclose == SC_NULL && (req->objcore->flags & OC_F_FAILED)) {
 		/* The object we delivered failed due to a streaming error.
 		 * Fail the request. */
 		req->doclose = SC_TX_ERROR;
+	}
 
 	if (boc != NULL)
 		HSH_DerefBoc(wrk, req->objcore);
@@ -763,6 +768,7 @@ cnt_pipe(struct worker *wrk, struct req *req)
 	CHECK_OBJ_NOTNULL(bo, BUSYOBJ_MAGIC);
 	VSLb(bo->vsl, SLT_Begin, "bereq %u pipe", VXID(req->vsl->wid));
 	VSLb(req->vsl, SLT_Link, "bereq %u pipe", VXID(bo->vsl->wid));
+	VSLb_ts_busyobj(bo, "Start", W_TIM_real(wrk));
 	THR_SetBusyobj(bo);
 	bo->sp = req->sp;
 	SES_Ref(bo->sp);
@@ -789,6 +795,8 @@ cnt_pipe(struct worker *wrk, struct req *req)
 		nxt = REQ_FSM_MORE;
 		break;
 	case VCL_RET_PIPE:
+		VSLb_ts_req(req, "Process", W_TIM_real(wrk));
+		VSLb_ts_busyobj(bo, "Process", wrk->lastused);
 		if (V1P_Enter() == 0) {
 			AZ(bo->req);
 			bo->req = req;
@@ -876,7 +884,8 @@ cnt_recv_prep(struct req *req, const char *ci)
 		http_CollectHdr(req->http, H_Cache_Control);
 
 		/* By default we use the first backend */
-		req->director_hint = VCL_DefaultDirector(req->vcl);
+		VRT_Assign_Backend(&req->director_hint,
+		    VCL_DefaultDirector(req->vcl));
 
 		req->d_ttl = -1;
 		req->d_grace = -1;
@@ -1169,6 +1178,7 @@ CNT_Request(struct req *req)
 		CHECK_OBJ_NOTNULL(wrk->wpriv, WORKER_PRIV_MAGIC);
 		CHECK_OBJ_ORNULL(wrk->wpriv->nobjhead, OBJHEAD_MAGIC);
 		CHECK_OBJ_NOTNULL(req, REQ_MAGIC);
+		CHECK_OBJ_NOTNULL(req->doclose, STREAM_CLOSE_MAGIC);
 
 		AN(req->req_step);
 		AN(req->req_step->name);
@@ -1190,6 +1200,7 @@ CNT_Request(struct req *req)
 		VCL_TaskLeave(ctx, req->privs);
 		AN(req->vsl->wid);
 		VRB_Free(req);
+		VRT_Assign_Backend(&req->director_hint, NULL);
 		req->wrk = NULL;
 	}
 	assert(nxt == REQ_FSM_DISEMBARK || !WS_IsReserved(req->ws));
