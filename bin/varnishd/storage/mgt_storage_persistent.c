@@ -259,3 +259,13 @@ smp_mgt_init(struct stevedore *parent, int ac, char * const *av)
 	/* XXX: only for sendfile I guess... */
 	MCH_Fd_Inherit(sc->fd, "storage_persistent");
 }
+
+#ifdef IS_A_VEXT
+void Vext_Init(void);
+
+void
+Vext_Init(void)
+{
+	STV_Register(&smp_stevedore, NULL);
+}
+#endif

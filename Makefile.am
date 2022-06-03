@@ -1,6 +1,6 @@
 ACLOCAL_AMFLAGS = -I m4 -I .
 
-SUBDIRS = include lib bin vmod etc doc man
+SUBDIRS = include lib bin vmod vext etc doc man
 
 TESTS = tools/magic_check.sh
 

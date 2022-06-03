@@ -184,7 +184,7 @@ STV_Register_The_Usual_Suspects(void)
 	STV_Register(&sma_stevedore, NULL);
 	STV_Register(&smd_stevedore, NULL);
 #ifdef WITH_PERSISTENT_STORAGE
-	STV_Register(&smp_stevedore, NULL);
+	// STV_Register(&smp_stevedore, NULL);
 	STV_Register(&smp_fake_stevedore, NULL);
 #endif
 #if defined(HAVE_UMEM_H)

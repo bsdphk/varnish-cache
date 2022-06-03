@@ -18,7 +18,9 @@ server s1 {
 	expect req.url == "/silo2"
 	txresp -hdr "X-Foo: foo"
 } -start
+
 varnish v1 \
+	-arg "-E${topbuild}/vext/debug_persistent/.libs/libvext_debug_persistent.so.3" \
 	-arg "-pfeature=+wait_silo" \
 	-arg "-pban_lurker_sleep=0" \
 	-arg "-sper1=deprecated_persistent,${tmpdir}/_.per1,5m" \
@@ -49,6 +51,7 @@ server s1 -wait
 # Only silo 1
 # Ban on obj.http.x-foo == foo
 varnish v2 \
+	-arg "-E${topbuild}/vext/debug_persistent/.libs/libvext_debug_persistent.so.3" \
 	-arg "-pfeature=+wait_silo" \
 	-arg "-pban_lurker_sleep=0" \
 	-arg "-sdeprecated_persistent,${tmpdir}/_.per1,5m" \
@@ -60,6 +63,7 @@ varnish v2 -stop
 # Silo 1 & 2
 # Bans should be transferred
 varnish v3 \
+	-arg "-E${topbuild}/vext/debug_persistent/.libs/libvext_debug_persistent.so.3" \
 	-arg "-pfeature=+wait_silo" \
 	-arg "-pban_lurker_sleep=0" \
 	-arg "-sdeprecated_persistent,${tmpdir}/_.per1,5m" \
@@ -76,6 +80,7 @@ server s1 {
 	txresp -hdr "X-Foo: bar"
 } -start
 varnish v4 \
+	-arg "-E${topbuild}/vext/debug_persistent/.libs/libvext_debug_persistent.so.3" \
 	-arg "-pfeature=+wait_silo" \
 	-arg "-pban_lurker_sleep=0" \
 	-arg "-sdeprecated_persistent,${tmpdir}/_.per2,5m" \

@@ -131,10 +131,13 @@ vext_copyin(struct vsb *vident)
 	}
 }
 
+typedef void vext_init_f(void);
+
 void
 vext_load(void)
 {
 	struct vext *vp;
+	vext_init_f *ifunc;
 
 	VTAILQ_FOREACH(vp, &vext_list, list) {
 		vp->dlptr = dlopen(
@@ -145,6 +148,11 @@ vext_load(void)
 			XXXAN(vp->dlptr);
 		}
 		fprintf(stderr, "Loaded -E %s\n", VSB_data(vp->vsb));
+		ifunc = dlsym(vp->dlptr, "Vext_Init");
+		if (ifunc != NULL) {
+			fprintf(stderr, "Calling Vext_Init()\n");
+			ifunc();
+		}
 	}
 }
 

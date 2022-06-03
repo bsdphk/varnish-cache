@@ -1,0 +1,2 @@
+
+SUBDIRS = debug_persistent

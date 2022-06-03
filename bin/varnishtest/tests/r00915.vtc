@@ -10,6 +10,7 @@ server s1 {
 shell "rm -f ${tmpdir}/_.per"
 
 varnish v1 \
+	-arg "-E${topbuild}/vext/debug_persistent/.libs/libvext_debug_persistent.so.3" \
 	-arg "-pfeature=+wait_silo" \
 	-arg "-sdeprecated_persistent,${tmpdir}/_.per,5m" \
 	-vcl+backend {

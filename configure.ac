@@ -918,5 +918,7 @@ AC_CONFIG_FILES([
     varnishapi.pc
     varnishapi-uninstalled.pc
     vmod/Makefile
+    vext/Makefile
+    vext/debug_persistent/Makefile
 ])
 AC_OUTPUT

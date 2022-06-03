@@ -11,6 +11,7 @@ server s1 {
 } -start
 
 varnish v1 \
+	-arg "-E${topbuild}/vext/debug_persistent/.libs/libvext_debug_persistent.so.3" \
 	-arg "-pfeature=+wait_silo" \
 	-arg "-sdeprecated_persistent,${tmpdir}/_.per,5m" \
 	-arg "-pban_lurker_sleep=0.01" \

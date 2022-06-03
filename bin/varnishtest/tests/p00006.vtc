@@ -13,6 +13,7 @@ server s1 {
 
 
 varnish v1 \
+	-arg "-E${topbuild}/vext/debug_persistent/.libs/libvext_debug_persistent.so.3" \
 	-arg "-sdeprecated_persistent,${tmpdir}/_.per,5m" \
 	-arg "-pcli_timeout=60" \
 	-arg "-pban_lurker_sleep=0" \
