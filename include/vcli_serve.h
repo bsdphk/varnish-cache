@@ -101,6 +101,7 @@ struct cli *VCLS_AddFd(struct VCLS *cs, int fdi, int fdo, cls_cb_f *closefunc,
 void VCLS_AddFunc(struct VCLS *cs, unsigned auth, struct cli_proto *clp);
 int VCLS_Poll(struct VCLS *cs, const struct cli*, int timeout);
 void VCLS_Destroy(struct VCLS **);
+void VCLS_Dispatch(struct cli *cli, struct VCLS *cs, char * const * av, int ac);
 
 /* From libvarnish/cli.c */
 cli_func_t	VCLS_func_close;

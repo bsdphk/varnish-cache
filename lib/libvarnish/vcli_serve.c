@@ -211,8 +211,8 @@ VCLS_func_help_json(struct cli *cli, const char * const *av, void *priv)
  * Look for a CLI command to execute
  */
 
-static void
-cls_dispatch(struct cli *cli, struct VCLS *cs, char * const * av, int ac)
+void
+VCLS_Dispatch(struct cli *cli, struct VCLS *cs, char * const * av, int ac)
 {
 	int json = 0;
 	struct cli_proto *cp;
@@ -321,7 +321,7 @@ cls_exec(struct VCLS_fd *cfd, char * const *av, int ac)
 			break;
 		}
 
-		cls_dispatch(cli, cs, av, ac);
+		VCLS_Dispatch(cli, cs, av, ac);
 
 	} while (0);
 

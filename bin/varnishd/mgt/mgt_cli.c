@@ -49,6 +49,7 @@
 
 #include "vcli_serve.h"
 #include "vev.h"
+#include "vipc.h"
 #include "vrnd.h"
 #include "vsa.h"
 #include "vss.h"
@@ -65,11 +66,12 @@ static const struct cli_cmd_desc *cmds[] = {
 
 static const int ncmds = sizeof cmds / sizeof cmds[0];
 
-static int		cli_i = -1, cli_o = -1;
 struct VCLS		*mgt_cls;
 static const char	*secret_file;
 
 static struct vsb	*cli_buf = NULL;
+
+static struct vipc	*wrk_vp;
 
 /*--------------------------------------------------------------------*/
 
@@ -133,7 +135,7 @@ mcf_askchild(struct cli *cli, const char * const *av, void *priv)
 	 * Command not recognized in master, try cacher if it is
 	 * running.
 	 */
-	if (cli_o <= 0) {
+	if (wrk_vp == NULL) {
 		VCLI_SetResult(cli, CLIS_UNKNOWN);
 		VCLI_Out(cli,
 		    "Unknown request in manager process "
@@ -148,13 +150,8 @@ mcf_askchild(struct cli *cli, const char * const *av, void *priv)
 	}
 	VSB_putc(cli_buf, '\n');
 	AZ(VSB_finish(cli_buf));
-	if (VSB_tofile(cli_buf, cli_o)) {
-		VCLI_SetResult(cli, CLIS_COMMS);
-		VCLI_Out(cli, "CLI communication error");
-		MCH_Cli_Fail();
-		return;
-	}
-	if (VCLI_ReadResult(cli_i, &u, &q, mgt_param.cli_timeout))
+	AZ(VIPC_SendMsg(wrk_vp, "CLI", VSB_data(cli_buf), VSB_len(cli_buf) + 1));
+	if (VIPC_RecvCliResult(wrk_vp, &u, &q, mgt_param.cli_timeout))
 		MCH_Cli_Fail();
 	VCLI_SetResult(cli, u);
 	VCLI_Out(cli, "%s", q);
@@ -177,7 +174,6 @@ static struct cli_proto cli_askchild[] = {
 int
 mgt_cli_askchild(unsigned *status, char **resp, const char *fmt, ...)
 {
-	int i;
 	va_list ap;
 	unsigned u;
 
@@ -187,7 +183,7 @@ mgt_cli_askchild(unsigned *status, char **resp, const char *fmt, ...)
 	if (resp != NULL)
 		*resp = NULL;
 	*status = 0;
-	if (cli_i < 0 || cli_o < 0) {
+	if (wrk_vp == NULL) {
 		*status = CLIS_CANT;
 		return (CLIS_CANT);
 	}
@@ -195,17 +191,9 @@ mgt_cli_askchild(unsigned *status, char **resp, const char *fmt, ...)
 	AZ(VSB_vprintf(cli_buf, fmt, ap));
 	va_end(ap);
 	AZ(VSB_finish(cli_buf));
-	i = VSB_len(cli_buf);
-	assert(i > 0 && VSB_data(cli_buf)[i - 1] == '\n');
-	if (VSB_tofile(cli_buf, cli_o)) {
-		*status = CLIS_COMMS;
-		if (resp != NULL)
-			*resp = strdup("CLI communication error");
-		MCH_Cli_Fail();
-		return (CLIS_COMMS);
-	}
+	AZ(VIPC_SendMsg(wrk_vp, "CLI", VSB_data(cli_buf), VSB_len(cli_buf) + 1));
 
-	if (VCLI_ReadResult(cli_i, &u, resp, mgt_param.cli_timeout))
+	if (VIPC_RecvCliResult(wrk_vp, &u, resp, mgt_param.cli_timeout))
 		MCH_Cli_Fail();
 	*status = u;
 	return (u == CLIS_OK || u == CLIS_TRUNCATED ? 0 : u);
@@ -216,14 +204,14 @@ mgt_cli_askchild(unsigned *status, char **resp, const char *fmt, ...)
 unsigned
 mgt_cli_start_child(int fd, double tmo)
 {
-	unsigned u;
-
-	cli_i = fd;
-	cli_o = fd;
-	if (VCLI_ReadResult(cli_i, &u, NULL, tmo)) {
+	char *subject;
+	void *ptr;
+	size_t len;
+	wrk_vp = VIPC_Create(fd, "MGR", "WRK");
+	AN(wrk_vp);
+	if (VIPC_RecvMsg(wrk_vp, &subject, &ptr, &len, tmo))
 		return (CLIS_COMMS);
-	}
-	return (u);
+	return (CLIS_OK);
 }
 
 /*--------------------------------------------------------------------*/
@@ -232,9 +220,9 @@ void
 mgt_cli_stop_child(void)
 {
 
-	cli_i = -1;
-	cli_o = -1;
 	/* XXX: kick any users */
+	if (wrk_vp != NULL)
+		VIPC_Destroy(&wrk_vp);
 }
 
 /*--------------------------------------------------------------------
@@ -306,7 +294,7 @@ mcf_auth(struct cli *cli, const char *const *av, void *priv)
 static void v_matchproto_(cli_func_t)
 mcf_help(struct cli *cli, const char * const *av, void *priv)
 {
-	if (cli_o <= 0)
+	if (wrk_vp == NULL)
 		VCLS_func_help(cli, av, priv);
 	else
 		mcf_askchild(cli, av, priv);
@@ -315,7 +303,7 @@ mcf_help(struct cli *cli, const char * const *av, void *priv)
 static void v_matchproto_(cli_func_t)
 mcf_help_json(struct cli *cli, const char * const *av, void *priv)
 {
-	if (cli_o <= 0)
+	if (wrk_vp == NULL)
 		VCLS_func_help_json(cli, av, priv);
 	else
 		mcf_askchild(cli, av, priv);

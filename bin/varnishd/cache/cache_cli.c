@@ -38,9 +38,13 @@
 
 #include "config.h"
 
+#include <stdlib.h>
+
 #include "cache_varnishd.h"
 #include "common/heritage.h"
 
+#include "vav.h"
+#include "vipc.h"
 #include "vcli_serve.h"
 
 pthread_t		cli_thread;
@@ -70,45 +74,73 @@ CLI_AddFuncs(struct cli_proto *p)
 	Lck_Unlock(&cli_mtx);
 }
 
-static void
-cli_cb_before(const struct cli *cli)
-{
-
-	ASSERT_CLI();
-	VSL(SLT_CLI, NO_VXID, "Rd %s", VSB_data(cli->cmd));
-	Lck_Lock(&cli_mtx);
-	VCL_Poll();
-}
-
-static void
-cli_cb_after(const struct cli *cli)
-{
-
-	ASSERT_CLI();
-	Lck_Unlock(&cli_mtx);
-	VSL(SLT_CLI, NO_VXID, "Wr %03u %zd %s",
-	    cli->result, VSB_len(cli->sb), VSB_data(cli->sb));
-}
-
 void
 CLI_Run(void)
 {
-	int i;
+	int ac, i;
 	struct cli *cli;
+	char **av;
+	struct vipc *vp;
+	char *subject;
+	void *payload;
+	size_t length;
 
 	add_check = 1;
 
+	vp = VIPC_Create(heritage.cli_fd, "WRK", "MGR");
+	AN(vp);
+
 	/* Tell waiting MGT that we are ready to speak CLI */
-	AZ(VCLI_WriteResult(heritage.cli_fd, CLIS_OK, "Ready"));
+	//AZ(VCLI_WriteResult(heritage.cli_fd, CLIS_OK, "Ready"));
+	AZ(VIPC_SendMsg(vp, "READY", "", 0));
 
 	cli = VCLS_AddFd(cache_cls,
 	    heritage.cli_fd, heritage.cli_fd, NULL, NULL);
 	AN(cli);
 	cli->auth = 255;	// Non-zero to disable paranoia in vcli_serve
 
-	do {
-		i = VCLS_Poll(cache_cls, cli, -1);
-	} while (i == 0);
+	cli->cmd = VSB_new_auto();
+	AN(cli->cmd);
+	while (1) {
+		// i = VCLS_Poll(cache_cls, cli, -1);
+		//sz = read(heritage.cli_fd, buf, sizeof buf - 1);
+		//if (sz <= 0)
+		//	break;
+		i = VIPC_RecvMsg(vp, &subject, &payload, &length, NAN);
+		if (i < 0)
+			break;
+		assert(i == 0);
+		assert(!strcmp(subject, "CLI"));
+		REPLACE(subject, NULL);
+		assert(length > 0);
+		VSB_clear(cli->cmd);
+		VSB_cat(cli->cmd, payload);
+		AZ(VSB_finish(cli->cmd));
+		av = VAV_Parse(payload, &ac, 0);
+		AN(av);
+		AZ(av[0]);
+		REPLACE(payload, NULL);
+
+		ASSERT_CLI();
+		VSL(SLT_CLI, NO_VXID, "Rd %s", VSB_data(cli->cmd));
+		Lck_Lock(&cli_mtx);
+		VCL_Poll();
+
+		VSB_clear(cli->sb);
+		cli->result = CLIS_UNKNOWN;
+		VCLS_Dispatch(cli, cache_cls, av, ac - 1);
+		AZ(VSB_finish(cli->sb));
+
+		ASSERT_CLI();
+		Lck_Unlock(&cli_mtx);
+		VSL(SLT_CLI, NO_VXID, "Wr %03u %zd %s",
+		    cli->result, VSB_len(cli->sb), VSB_data(cli->sb));
+
+		if (VIPC_SendCliResult(vp, cli->result, VSB_data(cli->sb)) ||
+		    cli->result == CLIS_CLOSE)
+			break;
+
+	}
 	VSL(SLT_CLI, NO_VXID, "EOF on CLI connection, worker stops");
 }
 
@@ -134,7 +166,6 @@ CLI_Init(void)
 	cache_cls = VCLS_New(heritage.cls);
 	AN(cache_cls);
 	VCLS_SetLimit(cache_cls, &cache_param->cli_limit);
-	VCLS_SetHooks(cache_cls, cli_cb_before, cli_cb_after);
 
 	CLI_AddFuncs(cli_cmds);
 }

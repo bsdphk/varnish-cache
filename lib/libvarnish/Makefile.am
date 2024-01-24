@@ -27,6 +27,7 @@ libvarnish_la_SOURCES = \
 	vfil.c \
 	vfl.c \
 	vin.c \
+	vipc.c \
 	vjsn.c \
 	vlu.c \
 	vmb.c \

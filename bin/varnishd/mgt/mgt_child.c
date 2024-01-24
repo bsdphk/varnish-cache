@@ -318,7 +318,7 @@ mgt_launch_child(struct cli *cli)
 	child_state = CH_STARTING;
 
 	/* Open pipe for mgt->child CLI */
-	AZ(socketpair(AF_UNIX, SOCK_STREAM, 0, cp));
+	AZ(socketpair(AF_UNIX, SOCK_SEQPACKET, 0, cp));
 	heritage.cli_fd = cp[0];
 	assert(cp[0] > STDERR_FILENO);	// See #2782
 	assert(cp[1] > STDERR_FILENO);
@@ -434,9 +434,9 @@ mgt_launch_child(struct cli *cli)
 	if (u != CLIS_OK) {
 		assert(u == CLIS_COMMS);
 		if (VTIM_mono() - t0 < dstart)
-			mgt_launch_err(cli, u, "Child failed on launch ");
+			mgt_launch_err(cli, CLIS_COMMS, "Child failed on launch ");
 		else
-			mgt_launch_err(cli, u, "Child failed on launch "
+			mgt_launch_err(cli, CLIS_COMMS, "Child failed on launch "
 			    "within %s_timeout=%.2fs%s",
 			    bstart ? "startup" : "cli", dstart,
 			    bstart ? "" : " (tip: set startup_timeout)");
@@ -446,7 +446,7 @@ mgt_launch_child(struct cli *cli)
 		child_state = CH_STOPPED;
 		return;
 	} else {
-		assert(u == CLIS_OK);
+		//assert(u == CLIS_OK);
 		fprintf(stderr, "Child launched OK\n");
 	}
 	whining_child = C_INFO;
