@@ -261,7 +261,7 @@ EXP_Rearm(struct objcore *oc, vtim_real now,
  */
 
 static void
-exp_inbox(struct exp_priv *ep, struct objcore *oc, unsigned flags)
+exp_inbox(struct exp_priv *ep, struct objcore *oc, unsigned flags, double now)
 {
 
 	CHECK_OBJ_NOTNULL(ep, EXP_PRIV_MAGIC);
@@ -279,6 +279,9 @@ exp_inbox(struct exp_priv *ep, struct objcore *oc, unsigned flags)
 		assert(oc->timer_idx == VBH_NOIDX);
 		assert(oc->refcnt > 0);
 		AZ(oc->exp_flags);
+		VSLb(&ep->vsl, SLT_ExpKill, "EXP_Removed x=%ju t=%.0f h=%jd",
+		    VXID(ObjGetXID(ep->wrk, oc)), EXP_Ttl(NULL, oc) - now,
+		    (intmax_t)oc->hits);
 		ObjSendEvent(ep->wrk, oc, OEV_EXPIRE);
 		(void)HSH_DerefObjCore(ep->wrk, &oc, 0);
 		return;
@@ -325,7 +328,7 @@ exp_expire(struct exp_priv *ep, vtim_real now)
 	oc = VBH_root(ep->heap);
 	if (oc == NULL)
 		return (now + 355. / 113.);
-	VSLb(&ep->vsl, SLT_ExpKill, "EXP_expire p=%p e=%.6f f=0x%x", oc,
+	VSLb(&ep->vsl, SLT_ExpKill, "EXP_Inspect p=%p e=%.6f f=0x%x", oc,
 	    oc->timer_when - now, oc->flags);
 
 	CHECK_OBJ_NOTNULL(oc, OBJCORE_MAGIC);
@@ -354,8 +357,9 @@ exp_expire(struct exp_priv *ep, vtim_real now)
 		assert(oc->timer_idx == VBH_NOIDX);
 
 		CHECK_OBJ_NOTNULL(oc->objhead, OBJHEAD_MAGIC);
-		VSLb(&ep->vsl, SLT_ExpKill, "EXP_Expired xid=%ju t=%.0f",
-		    VXID(ObjGetXID(ep->wrk, oc)), EXP_Ttl(NULL, oc) - now);
+		VSLb(&ep->vsl, SLT_ExpKill, "EXP_Expired x=%ju t=%.0f h=%jd",
+		    VXID(ObjGetXID(ep->wrk, oc)), EXP_Ttl(NULL, oc) - now,
+		    (intmax_t)oc->hits);
 		ObjSendEvent(ep->wrk, oc, OEV_EXPIRE);
 		(void)HSH_DerefObjCore(ep->wrk, &oc, 0);
 	}
@@ -426,7 +430,7 @@ exp_thread(struct worker *wrk, void *priv)
 		t = VTIM_real();
 
 		if (oc != NULL)
-			exp_inbox(ep, oc, flags);
+			exp_inbox(ep, oc, flags, t);
 		else
 			tnext = exp_expire(ep, t);
 	}
