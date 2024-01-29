@@ -74,6 +74,26 @@ CLI_AddFuncs(struct cli_proto *p)
 	Lck_Unlock(&cli_mtx);
 }
 
+static void
+cli_cb_before(const struct cli *cli)
+{
+
+	ASSERT_CLI();
+	VSL(SLT_CLI, NO_VXID, "Rd %s", VSB_data(cli->cmd));
+	Lck_Lock(&cli_mtx);
+	VCL_Poll();
+}
+
+static void
+cli_cb_after(const struct cli *cli)
+{
+
+	ASSERT_CLI();
+	Lck_Unlock(&cli_mtx);
+	VSL(SLT_CLI, NO_VXID, "Wr %03u %zd %s",
+	   cli->result, VSB_len(cli->sb), VSB_data(cli->sb));
+}
+
 void
 CLI_Run(void)
 {
@@ -91,7 +111,6 @@ CLI_Run(void)
 	AN(vp);
 
 	/* Tell waiting MGT that we are ready to speak CLI */
-	//AZ(VCLI_WriteResult(heritage.cli_fd, CLIS_OK, "Ready"));
 	AZ(VIPC_SendMsg(vp, "READY", "", 0));
 
 	cli = VCLS_AddFd(cache_cls,
@@ -121,20 +140,14 @@ CLI_Run(void)
 		AZ(av[0]);
 		REPLACE(payload, NULL);
 
-		ASSERT_CLI();
-		VSL(SLT_CLI, NO_VXID, "Rd %s", VSB_data(cli->cmd));
-		Lck_Lock(&cli_mtx);
-		VCL_Poll();
+		cli_cb_before(cli);
 
 		VSB_clear(cli->sb);
 		cli->result = CLIS_UNKNOWN;
 		VCLS_Dispatch(cli, cache_cls, av, ac - 1);
 		AZ(VSB_finish(cli->sb));
 
-		ASSERT_CLI();
-		Lck_Unlock(&cli_mtx);
-		VSL(SLT_CLI, NO_VXID, "Wr %03u %zd %s",
-		    cli->result, VSB_len(cli->sb), VSB_data(cli->sb));
+		cli_cb_after(cli);
 
 		if (VIPC_SendCliResult(vp, cli->result, VSB_data(cli->sb)) ||
 		    cli->result == CLIS_CLOSE)
