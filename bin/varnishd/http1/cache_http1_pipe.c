@@ -40,6 +40,7 @@
 
 #include "cache_http1.h"
 #include "vtcp.h"
+#include "vtim.h"
 
 #include "VSC_vbe.h"
 
@@ -113,10 +114,13 @@ V1P_Charge(struct req *req, const struct v1p_acct *a, struct VSC_vbe *b)
 	Lck_Unlock(&pipestat_mtx);
 }
 
-void
-V1P_Process(const struct req *req, int fd, struct v1p_acct *v1a)
+stream_close_t
+V1P_Process(const struct req *req, int fd, struct v1p_acct *v1a,
+    vtim_real deadline)
 {
 	struct pollfd fds[2];
+	vtim_dur tmo, tmo_task;
+	stream_close_t sc;
 	int i, j;
 
 	CHECK_OBJ_NOTNULL(req, REQ_MAGIC);
@@ -128,7 +132,7 @@ V1P_Process(const struct req *req, int fd, struct v1p_acct *v1a)
 		    req->htc->pipeline_e - req->htc->pipeline_b);
 		VTCP_Assert(j);
 		if (j < 0)
-			return;
+			return (SC_OVERLOAD);
 		req->htc->pipeline_b = NULL;
 		req->htc->pipeline_e = NULL;
 		v1a->in += j;
@@ -139,11 +143,20 @@ V1P_Process(const struct req *req, int fd, struct v1p_acct *v1a)
 	fds[1].fd = req->sp->fd;
 	fds[1].events = POLLIN;
 
+	sc = SC_TX_PIPE;
 	while (fds[0].fd > -1 || fds[1].fd > -1) {
 		fds[0].revents = 0;
 		fds[1].revents = 0;
-		i = poll(fds, 2,
-		    (int)(cache_param->pipe_timeout * 1e3));
+		tmo = cache_param->pipe_timeout;
+		if (tmo == 0.)
+			tmo = NAN;
+		if (deadline > 0.) {
+			tmo_task = deadline - VTIM_real();
+			tmo = vmin(tmo, tmo_task);
+		}
+		i = poll(fds, 2, VTIM_poll_tmo(tmo));
+		if (i == 0)
+			sc = SC_RX_TIMEOUT;
 		if (i < 1)
 			break;
 		if (fds[0].revents &&
@@ -165,6 +178,8 @@ V1P_Process(const struct req *req, int fd, struct v1p_acct *v1a)
 			fds[1].fd = -1;
 		}
 	}
+
+	return (sc);
 }
 
 /*--------------------------------------------------------------------*/
