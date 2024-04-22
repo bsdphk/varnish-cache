@@ -652,6 +652,8 @@ bereq.between_bytes_timeout
 
 	Writable from: backend
 
+	Unsetable from: vcl_pipe, backend
+
 	Default: ``.between_bytes_timeout`` attribute from the
 	:ref:`backend_definition`, which defaults to the
 	``between_bytes_timeout`` parameter, see :ref:`varnishd(1)`.
@@ -682,6 +684,8 @@ bereq.connect_timeout
 
 	Writable from: vcl_pipe, backend
 
+	Unsetable from: vcl_pipe, backend
+
 	Default: ``.connect_timeout`` attribute from the
 	:ref:`backend_definition`, which defaults to the
 	``connect_timeout`` parameter, see :ref:`varnishd(1)`.
@@ -699,6 +703,8 @@ bereq.first_byte_timeout
 	Readable from: backend
 
 	Writable from: backend
+
+	Unsetable from: vcl_pipe, backend
 
 	Default: ``.first_byte_timeout`` attribute from the
 	:ref:`backend_definition`, which defaults to the
@@ -1781,6 +1787,8 @@ sess.idle_send_timeout
 
 	Writable from: client
 
+	Unsetable from: client
+
 	Send timeout for individual pieces of data on client
 	connections, defaults to the ``idle_send_timeout`` parameter,
 	see :ref:`varnishd(1)`
@@ -1796,6 +1804,8 @@ sess.send_timeout
 
 	Writable from: client
 
+	Unsetable from: client
+
 	Total timeout for ordinary HTTP1 responses, defaults to the
 	``send_timeout`` parameter, see :ref:`varnishd(1)`
 
@@ -1810,6 +1820,8 @@ sess.timeout_idle
 
 	Writable from: client
 
+	Unsetable from: client
+
 	Idle timeout for this session, defaults to the
 	``timeout_idle`` parameter, see :ref:`varnishd(1)`
 
@@ -1823,6 +1835,8 @@ sess.timeout_linger
 	Readable from: client
 
 	Writable from: client
+
+	Unsetable from: client
 
 	Linger timeout for this session, defaults to the
 	``timeout_linger`` parameter, see :ref:`varnishd(1)`

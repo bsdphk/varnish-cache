@@ -34,7 +34,7 @@
  * REMEMBER to update the documentation (especially the varnishlog(1) man
  * page) whenever this list changes.
  *
- * XXX: Please add new entries a the end to not break saved log-segments.
+ * XXX: Please add new entries at the end to not break saved log-segments.
  *
  * Arguments:
  *	Tag-Name
@@ -92,7 +92,7 @@ SLTM(SessOpen, 0, "Client connection opened",
 	"\n"
 )
 /*
- * XXX generate the list of SC_* reasons (see also HTC info):
+ * XXX generate the list of SC_* reasons:
  *
  * #include <stdio.h>
  * int main(void) {
@@ -100,6 +100,7 @@ SLTM(SessOpen, 0, "Client connection opened",
  *	printf("\t\"\\t* ``%s``: %s\\n\"\n", #e, desc);
  * #include "include/tbl/sess_close.h"
  *	return (0);
+ * }
  */
 
 SLTM(SessClose, 0, "Client connection closed",
@@ -154,7 +155,7 @@ SLTM(BackendClose, 0, "Backend connection closed",
 	"The format is::\n\n"
 	"\t%d %s %s [ %s ]\n"
 	"\t|  |  |    |\n"
-	"\t|  |  |    +- Optional reason\n"
+	"\t|  |  |    +- Optional reason, see SessClose for explanation\n"
 	"\t|  |  +------ \"close\" or \"recycle\"\n"
 	"\t|  +--------- Backend display name\n"
 	"\t+------------ Connection file descriptor\n"
@@ -188,33 +189,9 @@ SLTM(Length, 0, "Size of object body",
 	"Logs the size of a fetch object body.\n\n"
 )
 
-/*
- * XXX generate HTC info below from tbl include
- *
- * #include <stdio.h>
- * int main(void) {
- * #define HTC_STATUS(e, n, s, l) \
- *	printf("\t\"\\t* ``%s`` (%d): %s\\n\"\n", s, n, l);
- * #include "include/tbl/htc.h"
- *	return (0);
- * }
- */
-
 SLTM(FetchError, 0, "Error while fetching object",
 	"Logs the error message of a failed fetch operation.\n\n"
-	"Error messages should be self-explanatory, yet the http connection\n"
-	"(HTC) class of errors is reported with these symbols:\n\n"
-	"\t* ``junk`` (-5): Received unexpected data\n"
-	"\t* ``close`` (-4): Connection closed\n"
-	"\t* ``timeout`` (-3): Timed out\n"
-	"\t* ``overflow`` (-2): Buffer/workspace too small\n"
-	"\t* ``eof`` (-1): Unexpected end of input\n"
-	"\t* ``empty`` (0): Empty response\n"
-	"\t* ``more`` (1): More data required\n"
-	"\t* ``complete`` (2): Data complete (no error)\n"
-	"\t* ``idle`` (3): Connection was closed while idle\n"
-	"\nNotice that some HTC errors are never emitted."
-	)
+)
 
 #define SLTH(tag, ind, req, resp, sdesc, ldesc) \
 	SLTM(Req##tag, (req ? 0 : SLT_F_UNUSED), "Client request " sdesc, ldesc)
@@ -390,6 +367,8 @@ SLTM(ExpKill, 0, "Object expiry event",
 	"\tLogged when the expiry thread expires an object.\n\n"
 	"EXP_Removed\n"
 	"\tLogged when the expiry thread removes an object before expiry.\n\n"
+	"VBF_Superseded\n"
+	"\tLogged when an object supersedes another.\n\n"
 	"LRU_Cand\n"
 	"\tLogged when an object is evaluated for LRU force expiry.\n\n"
 	"LRU\n"
@@ -405,6 +384,7 @@ SLTM(ExpKill, 0, "Object expiry event",
 	"\tEXP_Inspect p=%p e=%f f=0x%x\n"
 	"\tEXP_Expired x=%u t=%f h=%u\n"
 	"\tEXP_Removed x=%u t=%f h=%u\n"
+	"\tVBF_Superseded x=%u n=%u\n"
 	"\tLRU_Cand p=%p f=0x%x r=%d\n"
 	"\tLRU x=%u\n"
 	"\tLRU_Fail\n"
@@ -417,6 +397,7 @@ SLTM(ExpKill, 0, "Object expiry event",
 	"\tf=0x%x       Objcore flags\n"
 	"\tr=%d         Objcore refcount\n"
 	"\tx=%u         Object VXID\n"
+	"\tn=%u         New object VXID\n"
 	"\th=%u         Objcore hits\n"
 	"\n"
 )

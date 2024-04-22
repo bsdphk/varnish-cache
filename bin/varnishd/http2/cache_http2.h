@@ -44,16 +44,21 @@ struct h2_error_s {
 	uint32_t			val;
 	int				stream;
 	int				connection;
+	int				send_goaway;
 	stream_close_t			reason;
 };
 
 typedef const struct h2_error_s *h2_error;
 
+#define H2_ERROR_MATCH(err, target)			\
+	((err) != NULL && (err)->val == (target)->val)
+
 #define H2_CUSTOM_ERRORS
-#define H2EC1(U,v,r,d) extern const struct h2_error_s H2CE_##U[1];
-#define H2EC2(U,v,r,d) extern const struct h2_error_s H2SE_##U[1];
-#define H2EC3(U,v,r,d) H2EC1(U,v,r,d) H2EC2(U,v,r,d)
-#define H2_ERROR(NAME, val, sc, reason, desc) H2EC##sc(NAME, val, reason, desc)
+#define H2EC1(U,v,g,r,d) extern const struct h2_error_s H2CE_##U[1];
+#define H2EC2(U,v,g,r,d) extern const struct h2_error_s H2SE_##U[1];
+#define H2EC3(U,v,g,r,d) H2EC1(U,v,g,r,d) H2EC2(U,v,g,r,d)
+#define H2_ERROR(NAME, val, sc, goaway, reason, desc)	\
+	H2EC##sc(NAME, val, goaway, reason, desc)
 #include "tbl/h2_error.h"
 #undef H2EC1
 #undef H2EC2
@@ -163,8 +168,10 @@ struct h2_sess {
 
 	struct sess			*sess;
 	int				refcnt;
-	unsigned			open_streams;
+	int				open_streams;
+	int				winup_streams;
 	uint32_t			highest_stream;
+	int				goaway;
 	int				bogosity;
 	int				do_sweep;
 
@@ -223,11 +230,13 @@ struct h2h_decode {
 	unsigned			magic;
 #define H2H_DECODE_MAGIC		0xd092bde4
 
+	unsigned			has_authority:1;
 	unsigned			has_scheme:1;
 	h2_error			error;
 	enum vhd_ret_e			vhd_ret;
 	char				*out;
 	char				*reset;
+	int64_t				limit;
 	size_t				out_l;
 	size_t				out_u;
 	size_t				namelen;
@@ -255,7 +264,7 @@ void H2_Send(struct worker *, struct h2_req *, h2_frame type, uint8_t flags,
 
 /* cache_http2_proto.c */
 struct h2_req * h2_new_req(struct h2_sess *, unsigned stream, struct req *);
-int h2_stream_tmo(struct h2_sess *, const struct h2_req *, vtim_real);
+h2_error h2_stream_tmo(struct h2_sess *, const struct h2_req *, vtim_real);
 void h2_del_req(struct worker *, struct h2_req *);
 void h2_kill_req(struct worker *, struct h2_sess *, struct h2_req *, h2_error);
 int h2_rxframe(struct worker *, struct h2_sess *);

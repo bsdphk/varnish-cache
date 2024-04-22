@@ -82,9 +82,9 @@ jobs:
                   touch .is_weekly
                   # If version is "trunk", override version to add date
                   if grep 'AC_INIT.*trunk.*' ./configure.ac; then
-                      sed -i -e "s/AC_INIT(\[\(.*\)\],\[\(.*\)\],\[\(.*\)\])/AC_INIT([\1],[$(date +%Y%m%d)],[\3])/" ./configure.ac
+                      sed -i -e "s/AC_INIT(\[\(.*\)\],\s*\[\(.*\)\],\s*\[\(.*\)\])/AC_INIT([\1],[$(date +%Y%m%d)],[\3])/" ./configure.ac
                   else
-                      sed -i -e "s/AC_INIT(\[\(.*\)\],\[\(.*\)\],\[\(.*\)\])/AC_INIT([\1],[\2-$(date +%Y%m%d)],[\3])/" ./configure.ac
+                      sed -i -e "s/AC_INIT(\[\(.*\)\],\s*\[\(.*\)\],\s*\[\(.*\)\])/AC_INIT([\1],[\2-$(date +%Y%m%d)],[\3])/" ./configure.ac
                   fi
                   ./autogen.des
                   make dist -j 16
@@ -186,6 +186,7 @@ jobs:
             docker run \
               --rm \
               -it \
+              --security-opt seccomp=unconfined \
               -e PARAM_DIST=$(echo "<< parameters.platform >>" | cut -d: -f1) \
               -e PARAM_RELEASE=$(echo "<< parameters.platform >>" | cut -d: -f2) \
               -v$(pwd):/varnish-cache \
@@ -209,7 +210,7 @@ jobs:
         description: the Linux distribution (debian|ubuntu)
         type: string
       release:
-        description: the release name (buster|bullseye|bionic|focal|jammy)
+        description: the release name (buster|bullseye|bookworm|focal|jammy|noble)
         type: string
       make_target:
         description: the make target to execute during the build
@@ -223,8 +224,7 @@ jobs:
       - image: centos:7
     working_directory: /workspace
     steps:
-      - setup_remote_docker:
-          version: 20.10.11
+      - setup_remote_docker
       - run:
           name: Install docker
           command: yum install -y docker
@@ -354,7 +354,7 @@ jobs:
                 << parameters.extra_conf >>
             sudo -u varnish \
                 --preserve-env=ASAN_OPTIONS,LSAN_OPTIONS,TSAN_OPTIONS,UBSAN_OPTIONS \
-                make << parameters.make_target >> VERBOSE=1 -j 4 -k \
+                make -j 4 -k << parameters.make_target >> VERBOSE=1 \
                 DISTCHECK_CONFIGURE_FLAGS="<< pipeline.parameters.configure_args >> \
                 << parameters.extra_conf >>"
             '
@@ -406,11 +406,12 @@ workflows:
           dist: fedora
           release: latest
           make_target: witness.dot
-      # latest debian uses sanitizers
+      # oldest debian goes 32bit
       - build:
           name: build_debian_buster
           dist: debian
           release: buster
+          prefix: i386/
       - build:
           name: build_debian_bullseye
           dist: debian
@@ -419,13 +420,7 @@ workflows:
           name: build_debian_bookworm
           dist: debian
           release: bookworm
-          extra_conf: --enable-asan --enable-ubsan --enable-workspace-emulator
-      # oldest ubuntu goes 32bit
-      - build:
-          name: build_ubuntu_bionic
-          prefix: i386/
-          dist: ubuntu
-          release: bionic
+      # latest ubuntu uses sanitizers
       - build:
           name: build_ubuntu_focal
           dist: ubuntu
@@ -435,10 +430,17 @@ workflows:
           dist: ubuntu
           release: jammy
       - build:
+          name: build_ubuntu_noble
+          dist: ubuntu
+          release: noble
+          extra_conf: --enable-asan --enable-ubsan --enable-workspace-emulator
+          make_target: check -j2
+      - build:
           name: build_alpine
           dist: alpine
           release: "latest"
           extra_conf: --without-contrib
+          make_target: check
       - build:
           name: build_archlinux
           dist: archlinux
@@ -456,9 +458,9 @@ workflows:
           matrix:
             parameters:
               platform:
-                - ubuntu:bionic
                 - ubuntu:focal
                 - ubuntu:jammy
+                - ubuntu:noble
                 - debian:buster
                 - debian:bullseye
                 - debian:bookworm

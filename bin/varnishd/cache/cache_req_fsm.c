@@ -233,8 +233,6 @@ cnt_deliver(struct worker *wrk, struct req *req)
 	req->t_resp = W_TIM_real(wrk);
 	VCL_deliver_method(req->vcl, wrk, req, NULL, NULL);
 
-	VSLb_ts_req(req, "Process", W_TIM_real(wrk));
-
 	assert(req->restarts <= cache_param->max_restarts);
 
 	if (wrk->vpi->handling != VCL_RET_DELIVER) {
@@ -258,6 +256,8 @@ cnt_deliver(struct worker *wrk, struct req *req)
 
 		return (REQ_FSM_MORE);
 	}
+
+	VSLb_ts_req(req, "Process", W_TIM_real(wrk));
 
 	assert(wrk->vpi->handling == VCL_RET_DELIVER);
 
@@ -467,6 +467,8 @@ cnt_transmit(struct worker *wrk, struct req *req)
 	    VCL_StackVDP(req, req->vcl, req->vdp_filter_list)) {
 		VSLb(req->vsl, SLT_Error, "Failure to push processors");
 		req->doclose = SC_OVERLOAD;
+		req->acct.resp_bodybytes +=
+			VDP_Close(req->vdc, req->objcore, boc);
 	} else {
 		if (status < 200 || status == 204) {
 			// rfc7230,l,1691,1695
@@ -503,9 +505,6 @@ cnt_transmit(struct worker *wrk, struct req *req)
 		 * Fail the request. */
 		req->doclose = SC_TX_ERROR;
 	}
-
-	if (req->doclose != SC_NULL)
-		req->acct.resp_bodybytes += VDP_Close(req->vdc, req->objcore, boc);
 
 	if (boc != NULL)
 		HSH_DerefBoc(wrk, req->objcore);

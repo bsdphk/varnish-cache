@@ -99,9 +99,9 @@ VBE_Connect_Error(struct VSC_vbe *vsc, int err)
 	do {								\
 		CHECK_OBJ_NOTNULL(bo, BUSYOBJ_MAGIC);			\
 		dst = bo->tmx;						\
-		if (dst == 0.0)						\
+		if (isnan(dst) && be->tmx >= 0.0)			\
 			dst = be->tmx;					\
-		if (dst == 0.0)						\
+		if (isnan(dst))						\
 			dst = cache_param->tmx;				\
 	} while (0)
 
@@ -240,7 +240,7 @@ vbe_dir_finish(VRT_CTX, VCL_BACKEND d)
 	bo->htc->priv = NULL;
 	if (bo->htc->doclose != SC_NULL || bp->proxy_header != 0) {
 		VSLb(bo->vsl, SLT_BackendClose, "%d %s close %s", *PFD_Fd(pfd),
-		    VRT_BACKEND_string(d), bo->htc->doclose->desc);
+		    VRT_BACKEND_string(d), bo->htc->doclose->name);
 		VCP_Close(&pfd);
 		AZ(pfd);
 		Lck_Lock(bp->director->mtx);

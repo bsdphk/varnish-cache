@@ -163,8 +163,6 @@ void VCA_Shutdown(void);
 /* cache_backend_cfg.c */
 void VBE_InitCfg(void);
 
-void VBP_Init(void);
-
 /* cache_ban.c */
 
 /* for stevedoes resurrecting bans */
@@ -189,6 +187,7 @@ void VDI_Event(const struct director *d, enum vcl_event_e ev);
 void VDI_Init(void);
 
 /* cache_deliver_proc.c */
+void VDP_Fini(const struct vdp_ctx *vdc);
 void VDP_Init(struct vdp_ctx *vdc, struct worker *wrk, struct vsl_log *vsl,
     struct req *req);
 uint64_t VDP_Close(struct vdp_ctx *, struct objcore *, struct boc *);
@@ -206,7 +205,7 @@ vtim_real EXP_Ttl(const struct req *, const struct objcore *);
 vtim_real EXP_Ttl_grace(const struct req *, const struct objcore *oc);
 void EXP_RefNewObjcore(struct objcore *);
 void EXP_Insert(struct worker *wrk, struct objcore *oc);
-void EXP_Remove(struct objcore *);
+void EXP_Remove(struct objcore *, const struct objcore *);
 
 #define EXP_Dttl(req, oc) (oc->ttl - (req->t_req - oc->t_origin))
 
@@ -240,6 +239,8 @@ void EXP_Remove(struct objcore *);
 
 /* cache_exp.c */
 void EXP_Rearm(struct objcore *oc, vtim_real now,
+    vtim_dur ttl, vtim_dur grace, vtim_dur keep);
+void EXP_Reduce(struct objcore *oc, vtim_real now,
     vtim_dur ttl, vtim_dur grace, vtim_dur keep);
 
 /* From cache_main.c */
@@ -436,7 +437,7 @@ void SES_Wait(struct sess *, const struct transport *);
 void SES_Ref(struct sess *sp);
 void SES_Rel(struct sess *sp);
 
-const char * HTC_Status(enum htc_status_e);
+void HTC_Status(enum htc_status_e, const char **, const char **);
 void HTC_RxInit(struct http_conn *htc, struct ws *ws);
 void HTC_RxPipeline(struct http_conn *htc, char *);
 enum htc_status_e HTC_RxStuff(struct http_conn *, htc_complete_f *,
@@ -463,7 +464,8 @@ struct conn_pool;
 void VCP_Init(void);
 void VCP_Panic(struct vsb *, struct conn_pool *);
 
-/* cache_backend_poll.c */
+/* cache_backend_probe.c */
+void VBP_Init(void);
 
 /* cache_vary.c */
 int VRY_Create(struct busyobj *bo, struct vsb **psb);

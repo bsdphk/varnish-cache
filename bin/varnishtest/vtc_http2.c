@@ -52,7 +52,7 @@
 #define BUF_SIZE	(1024*2048)
 
 static const char *const h2_errs[] = {
-#define H2_ERROR(n,v,sc,r,t) [v] = #n,
+#define H2_ERROR(n,v,sc,g,r,t) [v] = #n,
 #include <tbl/h2_error.h>
 	NULL
 };
@@ -467,22 +467,20 @@ decode_hdr(struct http *hp, struct hpk_hdr *h, const struct vsb *vsb)
 		r = HPK_DecHdr(iter, h + n);
 		if (r == hpk_err )
 			break;
-		vtc_log(hp->vl, 4,
-				"header[%2d]: %s : %s",
-				n,
-				h[n].key.ptr,
-				h[n].value.ptr);
+		vtc_log(hp->vl, 4, "header[%2d]: %s: %s",
+		    n, h[n].key.ptr, h[n].value.ptr);
 		n++;
 		if (r == hpk_done)
 			break;
 	}
 
-	if (r != hpk_done)
+	if (r != hpk_done) {
 		vtc_log(hp->vl, hp->fatal ? 4 : 0,
-				"Header decoding failed (%d) %d", r, hp->fatal);
-	else if (n == MAX_HDR)
+		    "Header decoding failed (%d) %d", r, hp->fatal);
+	} else if (n == MAX_HDR) {
 		vtc_log(hp->vl, hp->fatal,
-				"Max number of headers reached (%d)", MAX_HDR);
+		    "Max number of headers reached (%d)", MAX_HDR);
+	}
 
 	HPK_FreeIter(iter);
 }
@@ -1011,7 +1009,7 @@ cmd_var_resolve(const struct stream *s, const char *spec, char *buf)
 	/* SECTION: stream.spec.zexpect.settings SETTINGS specific
 	 *
 	 * settings.ack
-	 *	"true" if the ACK flag was set, else ""false.
+	 *	"true" if the ACK flag was set, else "false".
 	 *
 	 * settings.push
 	 *	"true" if the push settings was set to yes, "false" if set to
@@ -1260,7 +1258,7 @@ cmd_var_resolve(const struct stream *s, const char *spec, char *buf)
 		else
 			return (NULL);
 	}
-#define H2_ERROR(U,v,sc,r,t) \
+#define H2_ERROR(U,v,sc,g,r,t) \
 	if (!strcmp(spec, #U)) { return (#v); }
 #include "tbl/h2_error.h"
 	return (spec);

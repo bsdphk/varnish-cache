@@ -34,12 +34,141 @@ http://varnish-cache.org/docs/trunk/whats-new/index.html and via
 individual releases. These documents are updated as part of the
 release process.
 
-===============================
-Varnish Cache NEXT (2024-03-15)
-===============================
+================================
+Varnish Cache 7.5.0 (2024-03-18)
+================================
 
 .. PLEASE keep this roughly in commit order as shown by git-log / tig
    (new to old)
+
+* Add ``h2_window_timeout`` paramater to mitigate CVE-2023-43622 (VSV00014_).
+
+* The parameters ``idle_send_timeout`` and ``timeout_idle`` are now
+  limited to a maximum of 1 hour.
+
+* The VCL variables ``bereq.connect_timeout``,
+  ``bereq.first_byte_timeout``, ``bereq.between_bytes_timeout``,
+  ``bereq.task_deadline``, ``sess.timeout_idle``,
+  ``sess.timeout_linger``, ``sess.idle_send_timeout`` and
+  ``sess.send_timeout`` can now be ``unset`` to use their default
+  values from parameters.
+
+* Timeout and deadline parameters can now be set to a new special value
+  ``never`` to apply an infinitely long timeout. Parameters which used to
+  be of type ``timeout`` but do not accept ``never`` have been moved to
+  the new type ``duration``. VCL variables cannot be set to ``never``.
+
+* The implementation of the feature flag ``esi_include_onerror`` changed
+  in Varnish-Cache 7.3.0 has been reverted to more closely match the
+  behavior before that release: By default, fragments are included
+  again, even errors. When ``esi_include_onerror`` is enabled and
+  errors are encountered while processing an ESI fragment, processing
+  only continues if the ``onerror`` attribute of the ``<esi:include>``
+  tag is present.
+
+  Any response status other than ``200`` or ``204`` counts as an error
+  as well as any fetch error.
+
+  Streaming responses may continue to be partially delivered.
+
+  Error behavior has been fixed to be consistent also for zero length
+  fragments.
+
+* The new VSC ``n_superseded`` gets incremented every time an object
+  is superseded by a new one, for example when the grace and/or keep
+  timers kept it in cache for longer than the TTL and a fresh copy is
+  fetched.
+
+  Cache evictions of superseded objects are logged as ``ExpKill``
+  messages starting with ``VBF_Superseded``.
+
+  .. _Varnish-Modules #222: https://github.com/varnish/varnish-modules/issues/222
+
+* The implementation of ``PRIV_TASK`` and ``PRIV_TOP`` VMOD
+  function/method arguments has been fixed to also work with
+  ``std.rollback()`` (`Varnish-Modules #222`_)
+
+* Transports are now responsible for calling ``VDP_Close()`` in all
+  cases.
+
+* The format of ``BackendClose`` VSL records has been changed to use
+  the short reason name for consistency with  ``SessClose``.
+
+* During ``varnishd`` shutdown, pooled backend connections are now
+  closed bi-directionally.
+
+* Mode bits of files opened via the UNIX jail as ``JAIL_FIXFD_FILE``
+  are now correctly set as ``0600``.
+
+* The ``busy_stats_rate`` feature now also works for HTTP/2.
+
+* The ``BUILD_VMOD_$NAME`` m4 macro for VMOD Makefiles has been fixed
+  to properly support custom ``CFLAGS``.
+
+* Storage engines are now responsible for deciding which
+  ``fetch_chunksize`` to use. When Varnish-Cache does not know the
+  expected object size, it calls the ``objgetspace`` stevedore
+  function with a zero ``sz`` argument.
+
+* The ``Timestamp`` SLT with ``Process`` prefix is not emitted any
+  more when processing continues as for restarts, or when ``vcl_deliver``
+  transitions to ``vcl_synth``.
+
+* The ``FetchError`` SLT with ``HTC`` prefix now contains a verbose
+  explanation.
+
+* Varnish Test Cases (VTCs) now support an ``include`` statement.
+
+* ``varnishncsa`` now supports the ``%{Varnish:default_format}x``
+  format to use the default format with additions.
+
+* A deadlock in ``VRT_AddDirector()`` is now avoided with dynamic
+  backends when the VCL goes cold.
+
+* A new variable ``bereq.task_deadline``, available in ``sub vcl_pipe
+  {}`` only for now, allows to limit the total duration of pipe
+  transactions. Its default comes from the ``pipe_task_deadline``
+  parameter, which itself defaults to ``never``.
+
+* The VSC counters ``n_expired``, ``n_purges`` and ``n_obj_purged``
+  have been fixed for purged objects.
+
+* The ``ExpKill`` SLT prefix ``EXP_expire`` has been renamed to
+  ``EXP_Inspect``.
+
+* New VSL records of the ``ExpKill`` SLT with ``EXP_Removed`` are now
+  emitted to uniformly log all "object removed from cache" events.
+
+* VSL records of the ``ExpKill`` SLT with ``EXP_Expired`` prefix now
+  contain the number of hits on the removed object.
+
+* A bug has been fixed in ``varnishstat`` where the description of the
+  last VSC was not shown.
+
+* VCL COLD events have been fixed for directors vs. VMODs: VDI COLD
+  now comes before VMOD COLD.
+
+* The ``file`` storage engine now fails properly if the file size is
+  too small.
+
+* The ``.happy`` stevedore type method now returns ``true`` if not
+  implemented instead of panicking ``varnishd`` (`4036`_)
+
+* Use of ``objiterate_f`` on request bodies has been fixed to
+  correctly post ``OBJ_ITER_END``.
+
+* Use of ``STV_NewObject()`` has been fixed to correctly request zero
+  bytes for attributes where only a body is to be stored.
+
+* ``(struct req).filter_list`` has been renamed to ``vdp_filter_list``.
+
+* 304 object copying has been optimized to make optimal use of storage
+  engines' allocations.
+
+* Use of the ``trimstore`` storage engine function has been fixed for
+  304 responses.
+
+* A missing ``:scheme`` for HTTP/2 requests is now properly handled.
 
 * The ``fold`` flag has been added to Access Control Lists (ACLs)
   in VCL. When it is activated with ``acl ... +fold {}``, ACL entries
@@ -144,6 +273,7 @@ Varnish Cache NEXT (2024-03-15)
 
 .. _CVE-2023-44487: https://nvd.nist.gov/vuln/detail/CVE-2023-44487
 
+.. _4036: https://github.com/varnishcache/varnish-cache/issues/4036
 .. _3984: https://github.com/varnishcache/varnish-cache/issues/3984
 .. _3995: https://github.com/varnishcache/varnish-cache/issues/3995
 .. _3996: https://github.com/varnishcache/varnish-cache/issues/3996
@@ -152,6 +282,7 @@ Varnish Cache NEXT (2024-03-15)
 .. _3997: https://github.com/varnishcache/varnish-cache/pull/3997
 .. _3998: https://github.com/varnishcache/varnish-cache/pull/3998
 .. _3999: https://github.com/varnishcache/varnish-cache/pull/3999
+.. _VSV00014: https://varnish-cache.org/security/VSV00014.html
 
 ================================
 Varnish Cache 7.4.0 (2023-09-15)

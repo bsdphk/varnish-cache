@@ -453,7 +453,7 @@ HSH_Lookup(struct req *req, struct objcore **ocp, struct objcore **bocp)
 
 		if (BAN_CheckObject(wrk, oc, req)) {
 			oc->flags |= OC_F_DYING;
-			EXP_Remove(oc);
+			EXP_Remove(oc, NULL);
 			continue;
 		}
 
@@ -718,6 +718,8 @@ HSH_Purge(struct worker *wrk, struct objhead *oh, vtim_real ttl_now,
 			}
 			if (oc->flags & OC_F_DYING)
 				continue;
+			if (is_purge)
+				oc->flags |= OC_F_DYING;
 			oc->refcnt++;
 			ocp[n++] = oc;
 		}
@@ -743,9 +745,9 @@ HSH_Purge(struct worker *wrk, struct objhead *oh, vtim_real ttl_now,
 		for (i = 0; i < j; i++) {
 			CHECK_OBJ_NOTNULL(ocp[i], OBJCORE_MAGIC);
 			if (is_purge)
-				EXP_Remove(ocp[i]);
+				EXP_Remove(ocp[i], NULL);
 			else
-				EXP_Rearm(ocp[i], ttl_now, ttl, grace, keep);
+				EXP_Reduce(ocp[i], ttl_now, ttl, grace, keep);
 			(void)HSH_DerefObjCore(wrk, &ocp[i], 0);
 			AZ(ocp[i]);
 			total++;
@@ -913,13 +915,24 @@ void
 HSH_Kill(struct objcore *oc)
 {
 
+	HSH_Replace(oc, NULL);
+}
+
+void
+HSH_Replace(struct objcore *oc, const struct objcore *new_oc)
+{
+
 	CHECK_OBJ_NOTNULL(oc, OBJCORE_MAGIC);
 	CHECK_OBJ_NOTNULL(oc->objhead, OBJHEAD_MAGIC);
+	if (new_oc != NULL) {
+		CHECK_OBJ(new_oc, OBJCORE_MAGIC);
+		assert(oc->objhead == new_oc->objhead);
+	}
 
 	Lck_Lock(&oc->objhead->mtx);
 	oc->flags |= OC_F_DYING;
 	Lck_Unlock(&oc->objhead->mtx);
-	EXP_Remove(oc);
+	EXP_Remove(oc, new_oc);
 }
 
 /*====================================================================
@@ -946,7 +959,7 @@ HSH_Snipe(const struct worker *wrk, struct objcore *oc)
 		Lck_Unlock(&oc->objhead->mtx);
 	}
 	if (retval)
-		EXP_Remove(oc);
+		EXP_Remove(oc, NULL);
 	return (retval);
 }
 

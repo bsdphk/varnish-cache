@@ -454,13 +454,21 @@ VTIM_timespec(vtim_dur t)
 	return (tv);
 }
 
+struct timeval
+VTIM_timeval_sock(vtim_dur t)
+{
+
+	return (VTIM_timeval(isinf(t) ? 0. : vmax(t, 1e-3)));
+}
+
 int
 VTIM_poll_tmo(vtim_dur tmo)
 {
 
-	if (isnan(tmo))
+	if (isinf(tmo))
 		return (-1);
-	return (vmax_t(int, 0, tmo * 1e3));
+	assert(!isnan(tmo));
+	return (vmax_t(int, 0, ((int)(tmo * 1e3))));
 }
 
 #ifdef TEST_DRIVER

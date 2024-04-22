@@ -209,19 +209,20 @@ Lck__Owned(const struct lock *lck)
 int v_matchproto_()
 Lck_CondWait(pthread_cond_t *cond, struct lock *lck)
 {
-       return (Lck_CondWaitUntil(cond, lck, 0));
+       return (Lck_CondWaitUntil(cond, lck, INFINITY));
 }
 
 int v_matchproto_()
 Lck_CondWaitTimeout(pthread_cond_t *cond, struct lock *lck, vtim_dur timeout)
 {
-	assert(timeout >= 0);
-	assert(timeout < 3600);
 
-	if (timeout == 0)
-		return (Lck_CondWaitUntil(cond, lck, 0));
-	else
-		return (Lck_CondWaitUntil(cond, lck, VTIM_real() + timeout));
+	if (isinf(timeout))
+		return (Lck_CondWaitUntil(cond, lck, INFINITY));
+
+	assert(timeout >= 0);
+	assert(timeout <= 3600);
+	timeout = vmax(timeout, 1e-3);
+	return (Lck_CondWaitUntil(cond, lck, VTIM_real() + timeout));
 }
 
 int v_matchproto_()
@@ -235,7 +236,7 @@ Lck_CondWaitUntil(pthread_cond_t *cond, struct lock *lck, vtim_real when)
 	AN(ilck->held);
 	assert(pthread_equal(ilck->owner, pthread_self()));
 	ilck->held = 0;
-	if (when == 0) {
+	if (isinf(when)) {
 		errno = pthread_cond_wait(cond, &ilck->mtx);
 		AZ(errno);
 	} else {
@@ -271,6 +272,9 @@ Lck_CondWaitUntil(pthread_cond_t *cond, struct lock *lck, vtim_real when)
 			errno = pthread_cond_timedwait(cond, &ilck->mtx, &ts);
 		}
 #endif
+		/* We should never observe EINTR, but we have in the past. For
+		 * example when sanitizers are enabled.
+		 */
 		assert(errno == 0 ||
 		    errno == ETIMEDOUT ||
 		    errno == EINTR);

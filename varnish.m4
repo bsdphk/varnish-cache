@@ -31,7 +31,7 @@
 # OF THE POSSIBILITY OF SUCH DAMAGE.
 
 # varnish.m4 - Macros to build against Varnish.         -*- Autoconf -*-
-# serial 11 (varnish-6.5.0)
+# serial 12 (varnish-7.5.0)
 #
 # This collection of macros helps create VMODs or tools interacting with
 # Varnish Cache using the GNU build system (autotools). In order to work
@@ -213,9 +213,9 @@ AC_DEFUN([_VARNISH_VMOD], [
 
 	AC_SUBST(m4_toupper(BUILD_VMOD_$1), ["
 
-vmod_$1.lo: vcc_$1_if.c vcc_$1_if.h
+\$(libvmod_$1_la_OBJECTS): vcc_$1_if.c vcc_$1_if.h
 
-vmod_$1.lo: \$(nodist_libvmod_$1_la_SOURCES)
+\$(libvmod_$1_la_OBJECTS): \$(nodist_libvmod_$1_la_SOURCES)
 
 vcc_$1_if.h vmod_$1.rst vmod_$1.man.rst: vcc_$1_if.c
 

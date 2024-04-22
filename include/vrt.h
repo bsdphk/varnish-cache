@@ -46,9 +46,9 @@
 #  error "include vdef.h before vrt.h"
 #endif
 
-#define VRT_MAJOR_VERSION	18U
+#define VRT_MAJOR_VERSION	19U
 
-#define VRT_MINOR_VERSION	1U
+#define VRT_MINOR_VERSION	0U
 
 /***********************************************************************
  * Major and minor VRT API versions.
@@ -57,9 +57,21 @@
  * Whenever something is deleted or changed in a way which is not
  * binary/load-time compatible, increment MAJOR version
  *
- * NEXT (2024-03-15)
+ * 19.0 (2024-03-18)
  *	[cache.h] (struct req).filter_list renamed to vdp_filter_list
  *	order of vcl/vmod and director COLD events reversed to directors first
+ *	VRT_u_sess_idle_send_timeout() added
+ *	VRT_u_sess_send_timeout() added
+ *	VRT_u_sess_timeout_idle() added
+ *	VRT_u_sess_timeout_linger() added
+ *	(struct vrt_backend).*_timeout must be initialized to a negative value
+ *	VRT_BACKEND_INIT() helper macro added
+ *	VRT_l_bereq_task_deadline() added
+ *	VRT_r_bereq_task_deadline() added
+ *	VRT_u_bereq_task_deadline() added
+ *	VRT_u_bereq_between_bytes_timeout() added
+ *	VRT_u_bereq_connect_timeout() added
+ *	VRT_u_bereq_first_byte_timeout() added
  * 18.1 (2023-12-05)
  *	vbf_objiterate() implementation changed #4013
  * 18.0 (2023-09-15)
@@ -577,6 +589,14 @@ struct vrt_endpoint {
 	vtim_dur			between_bytes_timeout;	\
 	unsigned			max_connections;	\
 	unsigned			proxy_header;
+
+#define VRT_BACKEND_INIT(be)					\
+	do {							\
+		INIT_OBJ(be, VRT_BACKEND_MAGIC);		\
+		(be)->connect_timeout = -1.0;			\
+		(be)->first_byte_timeout = -1.0;		\
+		(be)->between_bytes_timeout = -1.0;		\
+	} while(0)
 
 #define VRT_BACKEND_HANDLE()			\
 	do {					\

@@ -97,7 +97,7 @@ PARAM_SIMPLE(
 
 PARAM_SIMPLE(
 	/* name */	acceptor_sleep_incr,
-	/* type */	timeout,
+	/* type */	duration,
 	/* min */	"0",
 	/* max */	"1",
 	/* def */	"0",
@@ -112,7 +112,7 @@ PARAM_SIMPLE(
 
 PARAM_SIMPLE(
 	/* name */	acceptor_sleep_max,
-	/* type */	timeout,
+	/* type */	duration,
 	/* min */	"0",
 	/* max */	"10",
 	/* def */	"0.05",
@@ -182,7 +182,7 @@ PARAM_SIMPLE(
 
 PARAM_SIMPLE(
 	/* name */	ban_lurker_age,
-	/* type */	timeout,
+	/* type */	duration,
 	/* min */	"0",
 	/* max */	NULL,
 	/* def */	"60",
@@ -211,7 +211,7 @@ PARAM_SIMPLE(
 
 PARAM_SIMPLE(
 	/* name */	ban_lurker_sleep,
-	/* type */	timeout,
+	/* type */	duration,
 	/* min */	"0",
 	/* max */	NULL,
 	/* def */	"0.010",
@@ -225,7 +225,7 @@ PARAM_SIMPLE(
 
 PARAM_SIMPLE(
 	/* name */	ban_lurker_holdoff,
-	/* type */	timeout,
+	/* type */	duration,
 	/* min */	"0",
 	/* max */	NULL,
 	/* def */	"0.010",
@@ -267,7 +267,7 @@ PARAM_SIMPLE(
 
 PARAM_SIMPLE(
 	/* name */	backend_idle_timeout,
-	/* type */	timeout,
+	/* type */	duration,
 	/* min */	"1",
 	/* max */	NULL,
 	/* def */	"60",
@@ -278,7 +278,7 @@ PARAM_SIMPLE(
 
 PARAM_SIMPLE(
 	/* name */	backend_local_error_holddown,
-	/* type */	timeout,
+	/* type */	duration,
 	/* min */	"0.000",
 	/* max */	NULL,
 	/* def */	"10.000",
@@ -296,7 +296,7 @@ PARAM_SIMPLE(
 
 PARAM_SIMPLE(
 	/* name */	backend_remote_error_holddown,
-	/* type */	timeout,
+	/* type */	duration,
 	/* min */	"0.000",
 	/* max */	NULL,
 	/* def */	"0.250",
@@ -361,7 +361,7 @@ PARAM_SIMPLE(
 
 PARAM_SIMPLE(
 	/* name */	clock_step,
-	/* type */	timeout,
+	/* type */	duration,
 	/* min */	"0.000",
 	/* max */	NULL,
 	/* def */	"1.000",
@@ -387,7 +387,7 @@ PARAM_SIMPLE(
 
 PARAM_SIMPLE(
 	/* name */	critbit_cooloff,
-	/* type */	timeout,
+	/* type */	duration,
 	/* min */	"60.000",
 	/* max */	"254.000",
 	/* def */	"180.000",
@@ -400,7 +400,7 @@ PARAM_SIMPLE(
 
 PARAM_SIMPLE(
 	/* name */	default_grace,
-	/* type */	timeout,
+	/* type */	duration,
 	/* min */	"0.000",
 	/* max */	NULL,
 	/* def */	"10s",
@@ -417,7 +417,7 @@ PARAM_SIMPLE(
 
 PARAM_SIMPLE(
 	/* name */	default_keep,
-	/* type */	timeout,
+	/* type */	duration,
 	/* min */	"0.000",
 	/* max */	NULL,
 	/* def */	"0s",
@@ -435,7 +435,7 @@ PARAM_SIMPLE(
 
 PARAM_SIMPLE(
 	/* name */	default_ttl,
-	/* type */	timeout,
+	/* type */	duration,
 	/* min */	"0.000",
 	/* max */	NULL,
 	/* def */	"2m",
@@ -605,11 +605,13 @@ PARAM_SIMPLE(
 	/* units */	"bytes",
 	/* descr */
 	"Maximum number of bytes of HTTP client request we will deal with. "
-	" This is a limit on all bytes up to the double blank line which "
-	"ends the HTTP request.\n"
+	"This is a limit on all bytes up to the double blank line which "
+	"ends the HTTP request. "
 	"The memory for the request is allocated from the client workspace "
 	"(param: workspace_client) and this parameter limits how much of "
-	"that the request is allowed to take up."
+	"that the request is allowed to take up.\n\n"
+	"For HTTP2 clients, it is advertised as MAX_HEADER_LIST_SIZE in "
+	"the initial SETTINGS frame."
 )
 
 PARAM_SIMPLE(
@@ -643,9 +645,9 @@ PARAM_SIMPLE(
 PARAM_SIMPLE(
 	/* name */	idle_send_timeout,
 	/* type */	timeout,
-	/* min */	"0.000",
-	/* max */	NULL,
-	/* def */	"60.000",
+	/* min */	"0s",
+	/* max */	"1h",
+	/* def */	"60s",
 	/* units */	"seconds",
 	/* descr */
 	"Send timeout for individual pieces of data on client connections."
@@ -670,7 +672,7 @@ PARAM_SIMPLE(
 
 PARAM_SIMPLE(
 	/* name */	lru_interval,
-	/* type */	timeout,
+	/* type */	duration,
 	/* min */	"0.000",
 	/* max */	NULL,
 	/* def */	"2.000",
@@ -836,7 +838,7 @@ PARAM_SIMPLE(
 
 PARAM_SIMPLE(
 	/* name */	shortlived,
-	/* type */	timeout,
+	/* type */	duration,
 	/* min */	"0.000",
 	/* max */	NULL,
 	/* def */	"10.000",
@@ -895,7 +897,7 @@ PARAM_SIMPLE(
 #endif
 PARAM_SIMPLE(
 	/* name */	tcp_keepalive_intvl,
-	/* type */	timeout,
+	/* type */	duration,
 	/* min */	"1",
 	/* max */	"100",
 	/* def */	NULL,
@@ -928,7 +930,7 @@ PARAM_SIMPLE(
 
 PARAM_SIMPLE(
 	/* name */	tcp_keepalive_time,
-	/* type */	timeout,
+	/* type */	duration,
 	/* min */	"1",
 	/* max */	"7200",
 	/* def */	NULL,
@@ -946,10 +948,10 @@ PARAM_SIMPLE(
 
 PARAM_SIMPLE(
 	/* name */	timeout_idle,
-	/* type */	timeout,
-	/* min */	"0.000",
-	/* max */	NULL,
-	/* def */	"5.000",
+	/* type */	duration,
+	/* min */	"0s",
+	/* max */	"1h",
+	/* def */	"5s",
 	/* units */	"seconds",
 	/* descr */
 	"Idle timeout for client connections.\n\n"
@@ -962,7 +964,7 @@ PARAM_SIMPLE(
 
 PARAM_SIMPLE(
 	/* name */	timeout_linger,
-	/* type */	timeout,
+	/* type */	duration,
 	/* min */	"0.000",
 	/* max */	NULL,
 	/* def */	"0.050",
@@ -1017,7 +1019,7 @@ PARAM_SIMPLE(
 
 PARAM_SIMPLE(
 	/* name */	vcl_cooldown,
-	/* type */	timeout,
+	/* type */	duration,
 	/* min */	"1.000",
 	/* max */	NULL,
 	/* def */	"600.000",
@@ -1055,7 +1057,7 @@ PARAM_SIMPLE(
 
 PARAM_SIMPLE(
 	/* name */	vsm_free_cooldown,
-	/* type */	timeout,
+	/* type */	duration,
 	/* min */	"10.000",
 	/* max */	"600.000",
 	/* def */	"60.000",
@@ -1206,6 +1208,26 @@ PARAM_SIMPLE(
 )
 
 PARAM_SIMPLE(
+	/* name */	h2_window_timeout,
+	/* type */	timeout,
+	/* min */	"0",
+	/* max */	NULL,
+	/* def */	"5",
+	/* units */	"seconds",
+	/* descr */
+	"HTTP2 time limit without window credits. How long a stream may "
+	"wait for the client to credit the window and allow for more DATA "
+	"frames to be sent.",
+	/* flags */	WIZARD
+)
+
+#define H2_SETTING_NAME(nm) "SETTINGS_" #nm
+#define H2_SETTING_DESCR(nm)						\
+	"\n\nThe value of this parameter defines " H2_SETTING_NAME(nm)	\
+	" in the initial SETTINGS frame sent to the client when a new "	\
+	"HTTP2 session is established."
+
+PARAM_SIMPLE(
 	/* name */	h2_header_table_size,
 	/* type */	bytes_u,
 	/* min */	"0b",
@@ -1216,6 +1238,7 @@ PARAM_SIMPLE(
 	"HTTP2 header table size.\n"
 	"This is the size that will be used for the HPACK dynamic\n"
 	"decoding table."
+	H2_SETTING_DESCR(HEADER_TABLE_SIZE)
 )
 
 PARAM_SIMPLE(
@@ -1229,6 +1252,7 @@ PARAM_SIMPLE(
 	"HTTP2 Maximum number of concurrent streams.\n"
 	"This is the number of requests that can be active\n"
 	"at the same time for a single HTTP2 connection."
+	H2_SETTING_DESCR(MAX_CONCURRENT_STREAMS)
 )
 
 /* We have a strict min at the protocol default here. This is because we
@@ -1244,7 +1268,8 @@ PARAM_SIMPLE(
 	/* def */	"65535b",
 	/* units */	"bytes",
 	/* descr */
-	"HTTP2 initial flow control window size.",
+	"HTTP2 initial flow control window size."
+	H2_SETTING_DESCR(INITIAL_WINDOW_SIZE)
 )
 
 PARAM_SIMPLE(
@@ -1256,18 +1281,32 @@ PARAM_SIMPLE(
 	/* units */	"bytes",
 	/* descr */
 	"HTTP2 maximum per frame payload size we are willing to accept."
+	H2_SETTING_DESCR(MAX_FRAME_SIZE)
 )
 
 PARAM_SIMPLE(
 	/* name */	h2_max_header_list_size,
 	/* type */	bytes_u,
 	/* min */	"0b",
-	/* max */	NULL,
-	/* def */	"2147483647b",
+	/* max */	"2147483647b", /* NB: not the RFC maximum */
+	/* def */	"0b",
 	/* units */	"bytes",
 	/* descr */
-	"HTTP2 maximum size of an uncompressed header list."
+	"HTTP2 maximum size of an uncompressed header list. This parameter "
+	"is not mapped to " H2_SETTING_NAME(MAX_HEADER_LIST_SIZE) " in the "
+	"initial SETTINGS frame, the http_req_size parameter is instead.\n\n"
+	"The http_req_size advises HTTP2 clients of the maximum size for "
+	"the header list. Exceeding http_req_size results in a reset stream "
+	"after processing the HPACK block to perserve the connection, but "
+	"exceeding h2_max_header_list_size results in the HTTP2 connection "
+	"going away immediately.\n\n"
+	"If h2_max_header_list_size is lower than http_req_size, it has no "
+	"effect, except for the special value zero interpreted as 150% of "
+	"http_req_size."
 )
+
+#undef H2_SETTING_DESCR
+#undef H2_SETTING_NAME
 
 #define H2_RR_INFO \
 	"Changes to this parameter affect the default for new HTTP2 " \
@@ -1275,7 +1314,7 @@ PARAM_SIMPLE(
 
 PARAM_SIMPLE(
 	/* name */	h2_rapid_reset,
-	/* typ */	timeout,
+	/* typ */	duration,
 	/* min */	"0.000",
 	/* max */	NULL,
 	/* def */	"1.000",
@@ -1305,7 +1344,7 @@ PARAM_SIMPLE(
 
 PARAM_SIMPLE(
 	/* name */	h2_rapid_reset_period,
-	/* typ */	timeout,
+	/* typ */	duration,
 	/* min */	"1.000",
 	/* max */	NULL,
 	/* def */	"60.000",
@@ -1458,7 +1497,7 @@ PARAM_THREAD(
 PARAM_THREAD(
 	/* name */	thread_pool_timeout,
 	/* field */	timeout,
-	/* type */	timeout,
+	/* type */	duration,
 	/* min */	"10",
 	/* max */	NULL,
 	/* def */	"300",
@@ -1474,7 +1513,7 @@ PARAM_THREAD(
 PARAM_THREAD(
 	/* name */	thread_pool_watchdog,
 	/* field */	watchdog,
-	/* type */	timeout,
+	/* type */	duration,
 	/* min */	"0.1",
 	/* max */	NULL,
 	/* def */	"60",
@@ -1490,7 +1529,7 @@ PARAM_THREAD(
 PARAM_THREAD(
 	/* name */	thread_pool_destroy_delay,
 	/* field */	destroy_delay,
-	/* type */	timeout,
+	/* type */	duration,
 	/* min */	"0.01",
 	/* max */	NULL,
 	/* def */	"1",
@@ -1505,7 +1544,7 @@ PARAM_THREAD(
 PARAM_THREAD(
 	/* name */	thread_pool_add_delay,
 	/* field */	add_delay,
-	/* type */	timeout,
+	/* type */	duration,
 	/* min */	"0",
 	/* max */	NULL,
 	/* def */	"0",
@@ -1525,7 +1564,7 @@ PARAM_THREAD(
 PARAM_THREAD(
 	/* name */	thread_pool_fail_delay,
 	/* field */	fail_delay,
-	/* type */	timeout,
+	/* type */	duration,
 	/* min */	".01",
 	/* max */	NULL,
 	/* def */	"0.2",
@@ -1899,7 +1938,7 @@ PARAM_BITS(
 	"\tall\tEnable all tags\n"
 	"\tdefault\tSet default value (deprecated: use param.reset)\n"
 	"\nUse +/- prefix in front of VSL tag name to unmask/mask "
-	"individual VSL messages.")
+	"individual VSL messages. See vsl(7) for possible values.")
 PARAM_POST
 
 #undef PARAM_ALL

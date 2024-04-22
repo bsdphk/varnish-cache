@@ -45,6 +45,8 @@
 
 #include "vrt_obj.h"
 
+#define VRT_TMO(tmo) (isinf(tmo) ? VRT_DECIMAL_MAX : tmo)
+
 static char vrt_hostname[255] = "";
 
 /*--------------------------------------------------------------------
@@ -387,9 +389,27 @@ VRT_l_client_identity(VRT_CTX, const char *str, VCL_STRANDS s)
 
 /*--------------------------------------------------------------------*/
 
-#define BEREQ_TIMEOUT_UNSET0(which)
-
-#define BEREQ_TIMEOUT_UNSET1(which)				\
+#define BEREQ_TIMEOUT(prefix, which)				\
+VCL_VOID							\
+VRT_l_bereq_##which(VRT_CTX, VCL_DURATION num)			\
+{								\
+								\
+	CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);			\
+	CHECK_OBJ_NOTNULL(ctx->bo, BUSYOBJ_MAGIC);		\
+	ctx->bo->which = num;					\
+}								\
+								\
+VCL_DURATION							\
+VRT_r_bereq_##which(VRT_CTX)					\
+{								\
+	vtim_dur res;						\
+								\
+	CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);			\
+	CHECK_OBJ_NOTNULL(ctx->bo, BUSYOBJ_MAGIC);		\
+	res = BUSYOBJ_TMO(ctx->bo, prefix, which);		\
+	return (VRT_TMO(res));					\
+}								\
+								\
 VCL_VOID							\
 VRT_u_bereq_##which(VRT_CTX)					\
 {								\
@@ -399,31 +419,10 @@ VRT_u_bereq_##which(VRT_CTX)					\
 	ctx->bo->which = NAN;					\
 }
 
-#define BEREQ_TIMEOUT(which, unset)				\
-VCL_VOID							\
-VRT_l_bereq_##which(VRT_CTX, VCL_DURATION num)			\
-{								\
-								\
-	CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);			\
-	CHECK_OBJ_NOTNULL(ctx->bo, BUSYOBJ_MAGIC);		\
-	ctx->bo->which = (num > 0.0 ? num : 0.0);		\
-}								\
-								\
-VCL_DURATION							\
-VRT_r_bereq_##which(VRT_CTX)					\
-{								\
-								\
-	CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);			\
-	CHECK_OBJ_NOTNULL(ctx->bo, BUSYOBJ_MAGIC);		\
-	return (ctx->bo->which);				\
-}								\
-								\
-BEREQ_TIMEOUT_UNSET##unset(which)
-
-BEREQ_TIMEOUT(connect_timeout, 0)
-BEREQ_TIMEOUT(first_byte_timeout, 0)
-BEREQ_TIMEOUT(between_bytes_timeout, 0)
-BEREQ_TIMEOUT(task_deadline, 1)
+BEREQ_TIMEOUT(, connect_timeout)
+BEREQ_TIMEOUT(, first_byte_timeout)
+BEREQ_TIMEOUT(, between_bytes_timeout)
+BEREQ_TIMEOUT(pipe_, task_deadline)
 
 
 /*--------------------------------------------------------------------*/
@@ -1128,14 +1127,14 @@ HTTP_VAR(beresp)
 static inline void
 set_idle_send_timeout(const struct sess *sp, VCL_DURATION d)
 {
-	struct timeval tv = VTIM_timeval(d);
+	struct timeval tv = VTIM_timeval_sock(d);
 	VTCP_Assert(setsockopt(sp->fd, SOL_SOCKET, SO_SNDTIMEO,
 	    &tv, sizeof tv));
 }
 
 #define SESS_VAR_DUR(x, setter)				\
 VCL_VOID						\
-VRT_l_sess_##x(VRT_CTX, VCL_DURATION d)		\
+VRT_l_sess_##x(VRT_CTX, VCL_DURATION d)			\
 {							\
 	CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);		\
 	CHECK_OBJ_NOTNULL(ctx->sp, SESS_MAGIC);		\
@@ -1145,11 +1144,22 @@ VRT_l_sess_##x(VRT_CTX, VCL_DURATION d)		\
 }							\
 							\
 VCL_DURATION						\
-VRT_r_sess_##x(VRT_CTX)				\
+VRT_r_sess_##x(VRT_CTX)					\
+{							\
+	vtim_dur res;					\
+							\
+	CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);		\
+	CHECK_OBJ_NOTNULL(ctx->sp, SESS_MAGIC);		\
+	res = SESS_TMO(ctx->sp, x);			\
+	return (VRT_TMO(res));				\
+}							\
+							\
+VCL_VOID						\
+VRT_u_sess_##x(VRT_CTX)					\
 {							\
 	CHECK_OBJ_NOTNULL(ctx, VRT_CTX_MAGIC);		\
 	CHECK_OBJ_NOTNULL(ctx->sp, SESS_MAGIC);		\
-	return (SESS_TMO(ctx->sp, x));			\
+	ctx->sp->x = NAN;				\
 }
 
 SESS_VAR_DUR(timeout_idle, )

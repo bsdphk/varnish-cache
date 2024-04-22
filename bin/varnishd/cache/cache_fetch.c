@@ -332,6 +332,9 @@ vbf_stp_retry(struct worker *wrk, struct busyobj *bo)
 	bo->was_304 = 0;
 	bo->err_code = 0;
 	bo->err_reason = NULL;
+	bo->connect_timeout = NAN;
+	bo->first_byte_timeout = NAN;
+	bo->between_bytes_timeout = NAN;
 	if (bo->htc != NULL)
 		bo->htc->doclose = SC_NULL;
 
@@ -752,8 +755,12 @@ vbf_stp_fetchend(struct worker *wrk, struct busyobj *bo)
 
 	ObjSetState(wrk, oc, BOS_FINISHED);
 	VSLb_ts_busyobj(bo, "BerespBody", W_TIM_real(wrk));
-	if (bo->stale_oc != NULL)
-		HSH_Kill(bo->stale_oc);
+	if (bo->stale_oc != NULL) {
+		VSL(SLT_ExpKill, NO_VXID, "VBF_Superseded x=%ju n=%ju",
+		    VXID(ObjGetXID(wrk, bo->stale_oc)),
+		    VXID(ObjGetXID(wrk, bo->fetch_objcore)));
+		HSH_Replace(bo->stale_oc, bo->fetch_objcore);
+	}
 	return (F_STP_DONE);
 }
 
@@ -1215,6 +1222,8 @@ VBF_Fetch(struct worker *wrk, struct req *req, struct objcore *oc,
 
 	if (Pool_Task(wrk->pool, bo->fetch_task, prio)) {
 		wrk->stats->bgfetch_no_thread++;
+		VSLb(bo->vsl, SLT_FetchError,
+		    "No thread available for bgfetch");
 		(void)vbf_stp_fail(req->wrk, bo);
 		if (bo->stale_oc != NULL)
 			(void)HSH_DerefObjCore(wrk, &bo->stale_oc, 0);
